@@ -1,0 +1,40 @@
+seed: 42
+num_gpus: 1
+trainer:
+  name: base.TrainerModule
+  train_epochs: 500
+  check_val_every_n_epoch: 1
+  debug: False
+  enable_progress_bar: True
+  tabulate_model: True
+  seed: 42
+  logger:
+    log_dir: None
+    base_log_dir: 'tests/checkpoints/'
+    tool: 'TensorBoard'
+    project_name: 'default'
+  callbacks:
+    ModelCheckpoint:
+      monitor: 'val/acc'
+      mode: 'max'
+      save_top_k: 1
+      save_optimizer_state: False
+model:
+  name: SimpleEncoder
+  hparams:
+    c_hid: 32
+    latent_dim: 10
+    act_fn: 'gelu'
+optimizer:
+  name: adam
+  lr: 1e-3
+  weight_decay: 0
+  gradient_clip_norm: 10.0
+  scheduler:
+    name: warmup_cosine_decay
+    warmup_steps: 100
+dataset:
+  name: CIFAR10
+  data_dir: 'data/'
+  batch_size: 128
+  num_workers: 4
