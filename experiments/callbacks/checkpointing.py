@@ -21,12 +21,18 @@ class ModelCheckpoint(Callback):
             create=True
         )
         checkpointers = {
-            'params': orbax.checkpoint.PyTreeCheckpointer()
+            'params': orbax.checkpoint.PyTreeCheckpointer(),
+            'metadata': orbax.checkpoint.Checkpointer(orbax.checkpoint.JsonCheckpointHandler())
         }
         if self.trainer.state.mutable_variables is not None:
             checkpointers['mutable_variables'] = orbax.checkpoint.PyTreeCheckpointer()
         if self.config.get('save_optimizer_state', False):
             checkpointers['optimizer'] = orbax.checkpoint.PyTreeCheckpointer()
+        self.metadata = {
+            'trainer': self.trainer.trainer_config.to_dict(),
+            'model': self.trainer.model_config.to_dict(),
+            'optimizer': self.trainer.optimizer_config.to_dict()
+        }
         self.manager = orbax.checkpoint.CheckpointManager(
             directory=os.path.join(self.log_dir, 'checkpoints/'),
             checkpointers=checkpointers,
@@ -40,7 +46,7 @@ class ModelCheckpoint(Callback):
         """
         Saves model parameters and batch statistics to the logging directory.
         """
-        save_items = {'params': self.trainer.state.params}
+        save_items = {'params': self.trainer.state.params, 'metadata': self.metadata}
         if self.trainer.state.mutable_variables is not None:
             save_items['mutable_variables'] = self.trainer.state.mutable_variables
         if self.config.get('save_optimizer_state', False):

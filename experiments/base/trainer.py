@@ -580,8 +580,9 @@ class TrainerModule:
         Args:
           state_dict: State dictionary to restore from.
         """
-        logging.info('Restoring trainer state')
+        logging.info('Restoring trainer state with keys ' + str(state_dict.keys()))
         state_dict.pop('metrics')
+        state_dict.pop('metadata')
         self.state = TrainState.create(apply_fn=self.model.apply,
                                        # Optimizer will be overwritten when training starts
                                        tx=self.state.tx if self.state.tx else optax.sgd(0.1),
@@ -617,9 +618,11 @@ class TrainerModule:
         Returns:
           A Trainer object with model loaded from the checkpoint folder.
         """
-        hparams_file = os.path.join(checkpoint, 'config.yaml')
-        assert os.path.isfile(hparams_file), 'Could not find hparams file'
-        config = ConfigDict(yaml.safe_load(hparams_file))
+        # TODO: Write a test for it
+        metadata_file = os.path.join(checkpoint, 'metadata/metadata')
+        assert os.path.isfile(metadata_file), 'Could not find metadata file'
+        with open(metadata_file, 'rb') as f:
+            config = ConfigDict(json.load(f))
         if exmp_input is None:
             exmp_file = os.path.join(checkpoint, 'exmp_input.pkl')
             assert os.path.isfile(exmp_file), 'Could not find example input file'
