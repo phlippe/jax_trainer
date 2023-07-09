@@ -12,6 +12,7 @@ from collections import defaultdict
 
 # JAX/Flax libraries
 import jax
+import jax.numpy as jnp
 from jax import random
 from flax.training import train_state
 import optax
@@ -32,9 +33,9 @@ from models import SimpleEncoder
 
 
 class TrainState(train_state.TrainState):
-    # A simple extension of TrainState to also include batch statistics
-    # If a model has no batch statistics, it is None
-    batch_stats : Any = None
+    # A simple extension of TrainState to also include mutable variables 
+    # like batch statistics. If a model has no mutable vars, it is None
+    mutable_variables : Any = None
     # You can further extend the TrainState by any additional part here
     # For example, rng to keep for init, dropout, etc.
     rng : Any = None
@@ -155,11 +156,14 @@ class TrainerModule:
         model_rng, init_rng = random.split(model_rng)
         # Run model initialization
         variables = self.run_model_init(exmp_input, init_rng)
+        mutable_variables, params = variables.pop('params')
+        if len(mutable_variables) == 0:
+            mutable_variables = None
         # Create default state. Optimizer is initialized later
         self.state = TrainState(step=0,
                                 apply_fn=self.model.apply,
-                                params=variables['params'],
-                                batch_stats=variables.get('batch_stats'),
+                                params=params,
+                                mutable_variables=mutable_variables,
                                 rng=model_rng,
                                 tx=None,
                                 opt_state=None)
@@ -222,7 +226,7 @@ class TrainerModule:
         # Initialize training state
         self.state = TrainState.create(apply_fn=self.state.apply_fn,
                                        params=self.state.params,
-                                       batch_stats=self.state.batch_stats,
+                                       mutable_variables=self.state.mutable_variables,
                                        tx=optimizer,
                                        rng=self.state.rng)
 
@@ -240,6 +244,91 @@ class TrainerModule:
             self.train_step = jax.jit(train_step)
             self.eval_step = jax.jit(eval_step)
 
+    def loss_function(self, 
+                      params: Any, 
+                      state : TrainState, 
+                      batch : Batch, 
+                      rng : random.PRNGKey,
+                      train : bool = True) -> Tuple[jnp.array, Tuple[Any, Dict]]:
+        """
+        The loss function that is used for training. This function needs to be
+        overwritten by a subclass. 
+        """
+        raise NotImplementedError
+        # return loss, (mutable_vars, metrics)
+    
+    def model_apply(self,
+                    params : Any,
+                    state : TrainState,
+                    input : Any,
+                    rng: random.PRNGKey,
+                    train : bool = True,
+                    **kwargs) -> Tuple[Any, Dict]:
+        """
+        The model apply function that is used for evaluation. This function needs
+        to be overwritten by a subclass. 
+        """
+        rngs = self.get_model_rng(rng)
+        variables = {'params': params}
+        mutable_keys = False
+        if state.mutable_variables is not None:
+            variables.update({k: state.mutable_variables[k] for k in state.mutable_variables.keys()})
+            if train:
+                mutable_keys = list(state.mutable_variables.keys())
+        out = state.apply_fn(variables,
+                             input,
+                             train=train,
+                             rngs=rngs,
+                             mutable=mutable_keys,
+                             **kwargs)
+        if mutable_keys is not False:
+            out, mutable_vars = out
+        else:
+            mutable_vars = None
+        return out, mutable_vars
+    
+    def create_training_function(self) -> Callable[[TrainState, Batch], Tuple[TrainState, Dict]]:
+        """
+        Creates and returns a function for the training step. The function takes
+        as input the training state and a batch from the train loader. The
+        function is expected to return a dictionary of logging metrics, and a
+        new train state. 
+        """
+        def train_step(state : TrainState,
+                       batch : Batch):
+            next_rng, step_rng = random.split(state.rng)
+            loss_fn = lambda params: self.loss_function(params, 
+                                                        state, 
+                                                        batch, 
+                                                        step_rng,
+                                                        train=True)
+            ret, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
+            loss, mutable_vars, metrics = ret[0], *ret[1]
+            metrics['loss'] = loss
+            state = state.apply_gradients(grads=grads,
+                                          mutable_variables=mutable_vars,
+                                          rng=next_rng)
+            return state, metrics
+        return train_step
+    
+    def create_evaluation_function(self) -> Callable[[TrainState, Batch], Tuple[TrainState, Dict]]:
+        """
+        Creates and returns a function for the evaluation step. The function
+        takes as input the training state and a batch from the val/test loader.
+        The function is expected to return a dictionary of logging metrics, and
+        a new train state. 
+        """
+        def eval_step(state : TrainState,
+                      batch : Batch):
+            loss, (_, metrics) = self.loss_function(state.params,
+                                                    state,
+                                                    batch,
+                                                    random.PRNGKey(self.trainer_config.get('seed_eval', 0)),
+                                                    train=False)
+            metrics['loss'] = loss
+            return metrics
+        return eval_step
+
     def create_functions(self) -> Tuple[Callable[[TrainState, Batch], Tuple[TrainState, Dict]],
                                         Callable[[TrainState, Batch], Tuple[TrainState, Dict]]]:
         """
@@ -250,15 +339,7 @@ class TrainerModule:
         function needs to be overwritten by a subclass. The train_step and
         eval_step functions here are examples for the signature of the functions.
         """
-        def train_step(state : TrainState,
-                       batch : Batch):
-            metrics = {}
-            return state, metrics
-        def eval_step(state : TrainState,
-                      batch : Batch):
-            metrics = {}
-            return metrics
-        raise NotImplementedError
+        return self.create_training_function(), self.create_evaluation_function()
 
     def train_model(self,
                     train_loader : Iterator,
@@ -495,8 +576,8 @@ class TrainerModule:
           The model with parameters and evt. batch statistics bound to it.
         """
         params = {'params': self.state.params}
-        if self.state.batch_stats:
-            params['batch_stats'] = self.state.batch_stats
+        if self.state.mutable_variables is not None:
+            params.update(self.state.mutable_variables)
         return self.model.bind(params)
 
     @classmethod
