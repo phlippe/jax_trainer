@@ -363,6 +363,7 @@ class TrainerModule:
         self.init_optimizer(num_epochs, len(train_loader))
         # Prepare training loop
         self.on_training_start()
+        self.test_functions(train_loader, val_loader)
         all_eval_metrics = {}
         for epoch_idx in self.tracker(range(1, num_epochs+1), desc='Epochs'):
             self.on_training_epoch_start(epoch_idx)
@@ -387,6 +388,27 @@ class TrainerModule:
         # Close logger
         self.logger.finalize('success')
         return all_eval_metrics
+    
+    def test_functions(self,
+                       train_loader : Iterator,
+                       val_loader : Iterator):
+        """
+        Tests the training and evaluation functions on a few batches from the
+        train, val and test loader. This is useful to check if the functions
+        have the correct signature and return the correct values.
+        """
+        print('Verifying training and evaluation functions...')
+        train_batch = next(iter(train_loader))
+        start_time = time.time()
+        logging.info('Testing and compiling train_step...')
+        _ = self.train_step(self.state, train_batch)
+        logging.info(f'Successfully completed in {time.time() - start_time:.2f} seconds.')
+
+        val_batch = next(iter(val_loader))
+        start_time = time.time()
+        logging.info('Testing and compiling eval_step...')
+        _ = self.eval_step(self.state, val_batch)
+        logging.info(f'Successfully completed in {time.time() - start_time:.2f} seconds.')
 
     def train_epoch(self,
                     train_loader : Iterator) -> Dict[str, Any]:
