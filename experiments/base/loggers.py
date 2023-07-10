@@ -126,6 +126,13 @@ class Logger:
         if len(metrics_to_log) > 0:
             self.logger.log_metrics(metrics_to_log, step)
 
+    def log_scalar(self,
+                   metric_key: str,
+                   metric_value: Union[float, jnp.ndarray],
+                   step: int,
+                   log_postfix: str = ''):
+        self.log_metrics({metric_key: metric_value}, step, log_postfix)
+
     def finalize(self, status: str):
         self.logger.finalize(status)
 

@@ -1,2 +1,3 @@
 from experiments.callbacks.checkpointing import ModelCheckpoint
 from experiments.callbacks.classification import ConfusionMatrixCallback
+from experiments.callbacks.monitor import LearningRateMonitor

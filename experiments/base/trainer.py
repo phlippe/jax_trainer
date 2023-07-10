@@ -220,9 +220,10 @@ class TrainerModule:
           num_epochs: Number of epochs the model will be trained for.
           num_train_steps_per_epoch: Number of training steps per epoch.
         """
-        optimizer = build_optimizer(self.optimizer_config,
-                                    num_epochs=num_epochs,
-                                    num_train_steps_per_epoch=num_train_steps_per_epoch)
+        optimizer, lr_schedule = build_optimizer(self.optimizer_config,
+                                                 num_epochs=num_epochs,
+                                                 num_train_steps_per_epoch=num_train_steps_per_epoch)
+        self.lr_schedule = lr_schedule  # Save for logging
         # Initialize training state
         self.state = TrainState.create(apply_fn=self.state.apply_fn,
                                        params=self.state.params,

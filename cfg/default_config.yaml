@@ -24,6 +24,8 @@ trainer:
       normalize: True
       cmap: 'Blues'
       every_n_epochs: 2
+    LearningRateMonitor:
+      every_n_epochs: 1
 model:
   name: SimpleEncoder
   hparams:

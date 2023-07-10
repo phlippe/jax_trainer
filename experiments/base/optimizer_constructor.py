@@ -90,4 +90,4 @@ def build_optimizer(optimizer_config: ConfigDict,
         *grad_trans,
         opt_class(lr_schedule)
     )
-    return optimizer
+    return optimizer, lr_schedule
