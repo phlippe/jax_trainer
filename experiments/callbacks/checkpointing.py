@@ -39,7 +39,7 @@ class ModelCheckpoint(Callback):
             options=options
         )
 
-    def on_validation_epoch_end(self, eval_metrics, epoch_idx):
+    def _on_validation_epoch_end(self, eval_metrics, epoch_idx):
         self.save_model(eval_metrics, epoch_idx)
 
     def save_model(self, eval_metrics, epoch_idx):
@@ -51,6 +51,8 @@ class ModelCheckpoint(Callback):
             save_items['mutable_variables'] = self.trainer.state.mutable_variables
         if self.config.get('save_optimizer_state', False):
             save_items['optimizer'] = self.trainer.state.optimizer
+        eval_metrics = {k: eval_metrics[k] for k in eval_metrics 
+                        if isinstance(eval_metrics[k], (int, float, str, bool))}
         self.manager.save(epoch_idx, save_items, metrics=eval_metrics)
 
     def load_model(self, epoch_idx=-1):

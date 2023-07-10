@@ -4,8 +4,11 @@ from collections import defaultdict
 from absl import logging
 from typing import Dict, Any, Union
 import time
-from enum import Enum, IntEnum
+from enum import IntEnum
+import json
+import matplotlib.pyplot as plt
 
+import jax
 import jax.numpy as jnp
 
 # Logging with Tensorboard or Weights and Biases
@@ -68,6 +71,7 @@ class LogMetricMode(IntEnum):
     MAX = 4
     MIN = 5
     STD = 6
+    CONCAT = 7
 
 class LogMode(IntEnum):
     ANY = 0
@@ -189,7 +193,7 @@ class Logger:
                     metrics_dict[key]['value'] = max(metrics_dict[key]['value'], val)
                 elif mode == LogMetricMode.MIN:
                     metrics_dict[key]['value'] = min(metrics_dict[key]['value'], val)
-                elif mode == LogMetricMode.STD:
+                elif mode in [LogMetricMode.STD, LogMetricMode.CONCAT]:
                     if not isinstance(metrics_dict[key]['value'], list):
                         metrics_dict[key]['value'] = []
                     metrics_dict[key]['value'].append(val)
@@ -236,24 +240,101 @@ class Logger:
                 val /= element_count
             elif metrics[key]['mode'] == LogMetricMode.STD:
                 val = jnp.std(jnp.array(val), axis=0)
+            elif metrics[key]['mode'] == LogMetricMode.CONCAT:
+                val = jnp.concatenate(val, axis=0)
             if isinstance(val, jnp.ndarray) and val.size == 1:
                 val = val.item()
             save_key = f'{self.logging_mode}/{key}'
             final_metrics[save_key] = val
         return final_metrics
             
-    def end_epoch(self):
+    def end_epoch(self,
+                  save_metrics: bool = False):
         self.log_epoch_scalar('time', time.time() - self.epoch_start_time)
         final_epoch_metrics = self._finalize_metrics(metrics=self.epoch_metrics, 
                                                      element_count=self.epoch_element_count)
         self.log_metrics(final_epoch_metrics, 
                          step=self.epoch_idx,
                          log_postfix='epoch' if self.logging_mode == 'train' else '')
+        if save_metrics:
+            self.save_metrics(filename=f'{self.logging_mode}_epoch_{self.epoch_idx:04d}', 
+                              metrics=final_epoch_metrics)
         if self.logging_mode == 'train' and self.log_steps_every > 0 and self.epoch_step_count < self.log_steps_every:
             logging.info('Training epoch has fewer steps than the logging frequency. Resetting step metrics.')
             self._reset_step_metrics()
         self._reset_epoch_metrics()
         return final_epoch_metrics
+
+    def save_metrics(self,
+                     filename : str,
+                     metrics : Dict[str, Any]):
+        """
+        Saves a dictionary of metrics to file. Can be used as a textual
+        representation of the validation performance for checking in the terminal.
+
+        Args:
+          filename: Name of the metrics file without folders and postfix.
+          metrics: A dictionary of metrics to save in the file.
+        """
+        metrics = {k: metrics[k] for k in metrics if isinstance(metrics[k], (int, float, str, bool))}
+        with open(os.path.join(self.log_dir, f'metrics/{filename}.json'), 'w') as f:
+            json.dump(metrics, f, indent=4)
+
+    def log_image(self,
+                  key: str,
+                  image: jnp.ndarray,
+                  step: int = None,
+                  log_postfix: str = ''):
+        """
+        Logs an image to the tool of choice (e.g. Tensorboard/Wandb).
+
+        Args:
+          key: Name of the image.
+          image: Image to log.
+          step: Step to log the image at.
+          log_postfix: Postfix to append to the log key.
+        """
+        if step is None:
+            step = self.full_step_counter
+        if isinstance(image, jnp.ndarray):
+            image = jax.device_get(image)
+        if isinstance(self.logger, TensorBoardLogger):
+            self.logger.experiment.add_image(tag=f'{self.logging_mode}/{key}{log_postfix}',
+                                             img_tensor=image,
+                                             global_step=step,
+                                             dataformats='HWC')
+        elif isinstance(self.logger, WandbLogger):
+            self.logger.log_image(key=f'{self.logging_mode}/{key}{log_postfix}',
+                                  image=image,
+                                  step=step)
+        else:
+            raise ValueError(f'Unknown logger {self.logger}.')
+    
+    def log_figure(self,
+                   key: str,
+                   figure: plt.Figure,
+                   step: int = None,
+                   log_postfix: str = ''):
+        """
+        Logs a matplotlib figure to the tool of choice (e.g. Tensorboard/Wandb).
+
+        Args:
+            key: Name of the figure.
+            figure: Figure to log.
+            step: Step to log the image at.
+            log_postfix: Postfix to append to the log key.
+        """
+        if step is None:
+            step = self.full_step_counter
+        if isinstance(self.logger, TensorBoardLogger):
+            self.logger.experiment.add_figure(tag=f'{self.logging_mode}/{key}{log_postfix}',
+                                              figure=figure,
+                                              global_step=step)
+        elif isinstance(self.logger, WandbLogger):
+            self.logger.experiment.log({f'{self.logging_mode}/{key}{log_postfix}': figure},
+                                       step=step)
+        else:
+            raise ValueError(f'Unknown logger {self.logger}.')
         
     @property
     def log_dir(self):

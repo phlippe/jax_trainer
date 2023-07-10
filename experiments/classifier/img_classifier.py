@@ -30,12 +30,10 @@ class ImgClassifierTrainer(TrainerModule):
         loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels).mean()
         preds = logits.argmax(axis=-1)
         acc = (preds == labels).mean()
-        # conf_matrix = jnp.zeros((logits.shape[-1], logits.shape[-1]))
-        # conf_matrix[preds, labels] += 1
+        conf_matrix = jnp.zeros((logits.shape[-1], logits.shape[-1]))
+        conf_matrix = conf_matrix.at[preds, labels].add(1)
         metrics = {'acc': acc, 
                    'acc_std': {'value': acc, 'mode': LogMetricMode.STD, 'log_mode': LogMode.EVAL}, 
-                   'acc_max': {'value': acc, 'mode': LogMetricMode.MAX, 'log_mode': LogMode.TRAIN, 'log_freq': LogFreq.EPOCH}} 
-        
-                #    'conf_matrix': {'value': conf_matrix, 
-                #                    'mode': 'sum'}}
+                   'acc_max': {'value': acc, 'mode': LogMetricMode.MAX, 'log_mode': LogMode.TRAIN, 'log_freq': LogFreq.EPOCH},
+                   'conf_matrix': {'value': conf_matrix, 'mode': LogMetricMode.SUM, 'log_mode': LogMode.EVAL}}
         return loss, (mutable_variables, metrics)

@@ -20,6 +20,10 @@ trainer:
       mode: 'max'
       save_top_k: 1
       save_optimizer_state: False
+    ConfusionMatrixCallback:
+      normalize: True
+      cmap: 'Blues'
+      every_n_epochs: 2
 model:
   name: SimpleEncoder
   hparams:

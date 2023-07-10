@@ -373,14 +373,13 @@ class TrainerModule:
             if epoch_idx % self.trainer_config.check_val_every_n_epoch == 0:
                 eval_metrics = self.eval_model(val_loader, mode='val', epoch_idx=epoch_idx)
                 all_eval_metrics[epoch_idx] = eval_metrics
-                self.save_metrics(f'eval_epoch_{epoch_idx:04d}', eval_metrics)
                 self.on_validation_epoch_end(eval_metrics, epoch_idx)
         self.on_training_end()
         # Test best model if possible
         if test_loader is not None:
             self.load_model()
             test_metrics = self.eval_model(test_loader, mode='test', epoch_idx=epoch_idx)
-            self.save_metrics('test', test_metrics)
+            self.on_test_epoch_end(test_metrics, epoch_idx)
             all_eval_metrics['test'] = test_metrics
         # Close logger
         self.logger.finalize('success')
@@ -450,7 +449,7 @@ class TrainerModule:
         for batch in self.tracker(data_loader, desc=mode.capitalize(), leave=False):
             step_metrics = self.eval_step(self.state, batch)
             self.logger.log_step(step_metrics, element_count=batch.size)
-        metrics = self.logger.end_epoch()
+        metrics = self.logger.end_epoch(save_metrics=True)
         return metrics
 
     def tracker(self,
@@ -472,21 +471,6 @@ class TrainerModule:
             return tqdm(iterator, **kwargs)
         else:
             return iterator
-
-    def save_metrics(self,
-                     filename : str,
-                     metrics : Dict[str, Any]):
-        """
-        Saves a dictionary of metrics to file. Can be used as a textual
-        representation of the validation performance for checking in the terminal.
-
-        Args:
-          filename: Name of the metrics file without folders and postfix.
-          metrics: A dictionary of metrics to save in the file.
-        """
-        metrics = {k: metrics[k] for k in metrics if isinstance(metrics[k], (int, float, str, bool))}
-        with open(os.path.join(self.log_dir, f'metrics/{filename}.json'), 'w') as f:
-            json.dump(metrics, f, indent=4)
 
     def on_training_start(self):
         """
@@ -550,6 +534,24 @@ class TrainerModule:
         logging.info(f'Finished validation epoch {epoch_idx}')
         for callback in self.callbacks:
             callback.on_validation_epoch_end(eval_metrics, epoch_idx)
+
+    def on_test_epoch_end(self,
+                          test_metrics : Dict[str, Any],
+                          epoch_idx : int):
+        """
+        Method called at the end of each test epoch. Can be used for additional
+        logging and evaluation.
+
+        Args:
+          epoch_idx: Index of the training epoch at which testing was performed.
+          test_metrics: A dictionary of the test metrics. New metrics added to
+            this dictionary will be logged as well.
+          test_loader: Data loader of the test set, to support additional
+            evaluation.
+        """
+        logging.info(f'Finished test epoch {epoch_idx}')
+        for callback in self.callbacks:
+            callback.on_test_epoch_end(test_metrics, epoch_idx)
     
     def load_model(self, epoch_idx : int = -1):
         """
