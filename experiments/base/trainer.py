@@ -24,7 +24,7 @@ import pickle
 from absl import flags, logging
 
 from experiments.base.optimizer_constructor import build_optimizer
-from experiments.base.loggers import build_logger
+from experiments.base.loggers import Logger
 from datasets.utils import Batch
 import experiments.callbacks as callbacks
 from experiments.callbacks import ModelCheckpoint
@@ -112,7 +112,7 @@ class TrainerModule:
             'model': self.model_config,
             'optimizer': self.optimizer_config
         })
-        self.logger = build_logger(logger_config, full_config)
+        self.logger = Logger(logger_config, full_config)
         # Save config and exmp_input
         log_dir = self.logger.log_dir
         self.log_dir = log_dir
@@ -367,13 +367,11 @@ class TrainerModule:
         all_eval_metrics = {}
         for epoch_idx in self.tracker(range(1, num_epochs+1), desc='Epochs'):
             self.on_training_epoch_start(epoch_idx)
-            train_metrics = self.train_epoch(train_loader)
-            self.logger.log_metrics(train_metrics, step=epoch_idx)
+            train_metrics = self.train_epoch(train_loader, epoch_idx=epoch_idx)
             self.on_training_epoch_end(train_metrics, epoch_idx)
             # Validation every N epochs
             if epoch_idx % self.trainer_config.check_val_every_n_epoch == 0:
-                eval_metrics = self.eval_model(val_loader, log_prefix='val')
-                self.logger.log_metrics(eval_metrics, step=epoch_idx)
+                eval_metrics = self.eval_model(val_loader, mode='val', epoch_idx=epoch_idx)
                 all_eval_metrics[epoch_idx] = eval_metrics
                 self.save_metrics(f'eval_epoch_{epoch_idx:04d}', eval_metrics)
                 self.on_validation_epoch_end(eval_metrics, epoch_idx)
@@ -381,8 +379,7 @@ class TrainerModule:
         # Test best model if possible
         if test_loader is not None:
             self.load_model()
-            test_metrics = self.eval_model(test_loader, log_prefix='test')
-            self.logger.log_metrics(test_metrics, step=epoch_idx)
+            test_metrics = self.eval_model(test_loader, mode='test', epoch_idx=epoch_idx)
             self.save_metrics('test', test_metrics)
             all_eval_metrics['test'] = test_metrics
         # Close logger
@@ -411,55 +408,49 @@ class TrainerModule:
         logging.info(f'Successfully completed in {time.time() - start_time:.2f} seconds.')
 
     def train_epoch(self,
-                    train_loader : Iterator) -> Dict[str, Any]:
+                    train_loader : Iterator,
+                    epoch_idx : int) -> Dict[str, Any]:
         """
         Trains a model for one epoch.
 
         Args:
           train_loader: Data loader of the training set.
+          epoch_idx: Current epoch index.
 
         Returns:
           A dictionary of the average training metrics over all batches
           for logging.
         """
         # Train model for one epoch, and log avg loss and accuracy
-        metrics = defaultdict(float)
-        num_train_steps = len(train_loader)
-        start_time = time.time()
+        self.logger.start_epoch(epoch_idx, mode='train')
         for batch in self.tracker(train_loader, desc='Training', leave=False):
             self.state, step_metrics = self.train_step(self.state, batch)
-            for key in step_metrics:
-                metrics['train/' + key] += step_metrics[key] / num_train_steps
-        metrics = {key: metrics[key].item() for key in metrics}
-        metrics['epoch_time'] = time.time() - start_time
+            self.logger.log_step(step_metrics, element_count=batch.size)
+        metrics = self.logger.end_epoch()
         return metrics
 
     def eval_model(self,
                    data_loader : Iterator,
-                   log_prefix : Optional[str] = '') -> Dict[str, Any]:
+                   mode : str,
+                   epoch_idx : int) -> Dict[str, Any]:
         """
         Evaluates the model on a dataset.
 
         Args:
           data_loader: Data loader of the dataset to evaluate on.
-          log_prefix: Prefix to add to all metrics (e.g. 'val/' or 'test/')
+          mode: Whether 'val' or 'test'
+          epoch_idx: Current epoch index.
 
         Returns:
           A dictionary of the evaluation metrics, averaged over data points
           in the dataset.
         """
         # Test model on all images of a data loader and return avg loss
-        metrics = defaultdict(float)
-        num_elements = 0
-        start_time = time.time()
-        for batch in data_loader:
+        self.logger.start_epoch(epoch_idx, mode=mode)
+        for batch in self.tracker(data_loader, desc=mode.capitalize(), leave=False):
             step_metrics = self.eval_step(self.state, batch)
-            batch_size = batch.size
-            for key in step_metrics:
-                metrics[key] += step_metrics[key] * batch_size
-            num_elements += batch_size
-        metrics = {(log_prefix + '/' + key): (metrics[key] / num_elements).item() for key in metrics}
-        metrics[f'{log_prefix}/time'] = time.time() - start_time
+            self.logger.log_step(step_metrics, element_count=batch.size)
+        metrics = self.logger.end_epoch()
         return metrics
 
     def tracker(self,
@@ -493,6 +484,7 @@ class TrainerModule:
           filename: Name of the metrics file without folders and postfix.
           metrics: A dictionary of metrics to save in the file.
         """
+        metrics = {k: metrics[k] for k in metrics if isinstance(metrics[k], (int, float, str, bool))}
         with open(os.path.join(self.log_dir, f'metrics/{filename}.json'), 'w') as f:
             json.dump(metrics, f, indent=4)
 
