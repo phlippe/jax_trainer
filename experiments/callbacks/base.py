@@ -1,15 +1,16 @@
-from ml_collections import ConfigDict
-from datasets.utils import DatasetModule
 from typing import Any
+
+from ml_collections import ConfigDict
+
+from datasets.utils import DatasetModule
 
 
 class Callback:
-
     def __init__(self, config: ConfigDict, trainer: Any, data_module: DatasetModule):
         self.config = config
         self.trainer = trainer
         self.data_module = data_module
-        self.every_n_epochs = config.get('every_n_epochs', 1)
+        self.every_n_epochs = config.get("every_n_epochs", 1)
 
     def on_training_start(self):
         pass
@@ -21,7 +22,7 @@ class Callback:
         if epoch_idx % self.every_n_epochs != 0:
             return
         self._on_training_epoch_start(epoch_idx)
-    
+
     def _on_training_epoch_start(self, epoch_idx):
         pass
 

@@ -1,10 +1,11 @@
-from typing import NamedTuple, Any, Union, Sequence, Callable
+from typing import Any, Callable, NamedTuple, Sequence, Union
+
 import numpy as np
+import PIL
 import torch
 import torch.utils.data as data
-import PIL
-from ml_collections import ConfigDict
 from flax.struct import dataclass
+from ml_collections import ConfigDict
 
 
 class DatasetModule(NamedTuple):
@@ -29,13 +30,12 @@ class SupervisedBatch(Batch):
     target: np.ndarray
 
 
-def image_to_numpy(img : Any):
-    img = np.array(img, dtype=np.float32) / 255.
+def image_to_numpy(img: Any):
+    img = np.array(img, dtype=np.float32) / 255.0
     return img
 
 
-def normalize_transform(mean : Union[np.ndarray, float] = 0.,
-                        std : Union[np.ndarray, float] = 1.):
+def normalize_transform(mean: Union[np.ndarray, float] = 0.0, std: Union[np.ndarray, float] = 1.0):
     return lambda x: (x - mean.astype(x.dtype)) / std.astype(x.dtype)
 
 
@@ -44,12 +44,12 @@ def numpy_collate(batch: Union[np.ndarray, Sequence[Any], Any]):
         return batch
     elif isinstance(batch[0], np.ndarray):
         return np.stack(batch)
-    elif isinstance(batch[0], (tuple,list)):
+    elif isinstance(batch[0], (tuple, list)):
         transposed = zip(*batch)
         return [numpy_collate(samples) for samples in transposed]
     else:
         return np.array(batch)
-    
+
 
 def batch_collate(tuple_class: NamedTuple, batch: Sequence[Any]):
     size = batch[0].shape[0]
@@ -60,13 +60,13 @@ def build_batch_collate(tuple_class: NamedTuple):
     return lambda batch: batch_collate(tuple_class, numpy_collate(batch))
 
 
-
-def build_data_loaders(*datasets : Sequence[data.Dataset],
-                        train : Union[bool, Sequence[bool]] = True,
-                        collate_fn : Callable = numpy_collate,
-                        config : ConfigDict = ConfigDict()):
-    """
-    Creates data loaders used in JAX for a set of datasets.
+def build_data_loaders(
+    *datasets: Sequence[data.Dataset],
+    train: Union[bool, Sequence[bool]] = True,
+    collate_fn: Callable = numpy_collate,
+    config: ConfigDict = ConfigDict()
+):
+    """Creates data loaders used in JAX for a set of datasets.
 
     Args:
       datasets: Datasets for which data loaders are created.
@@ -81,13 +81,15 @@ def build_data_loaders(*datasets : Sequence[data.Dataset],
     if not isinstance(train, (list, tuple)):
         train = [train for _ in datasets]
     for dataset, is_train in zip(datasets, train):
-        loader = data.DataLoader(dataset,
-                                 batch_size=config.get('batch_size', 128),
-                                 shuffle=is_train,
-                                 drop_last=is_train,
-                                 collate_fn=collate_fn,
-                                 num_workers=config.get('num_workers', 4),
-                                 persistent_workers=is_train,
-                                 generator=torch.Generator().manual_seed(config.get('seed', 42)))
+        loader = data.DataLoader(
+            dataset,
+            batch_size=config.get("batch_size", 128),
+            shuffle=is_train,
+            drop_last=is_train,
+            collate_fn=collate_fn,
+            num_workers=config.get("num_workers", 4),
+            persistent_workers=is_train,
+            generator=torch.Generator().manual_seed(config.get("seed", 42)),
+        )
         loaders.append(loader)
     return loaders

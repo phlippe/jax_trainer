@@ -11,19 +11,19 @@ trainer:
   log_grad_norm: False
   logger:
     log_dir: None
-    base_log_dir: 'checkpoints/'
-    tool: 'TensorBoard'
-    project_name: 'default'
-    stderrthreshold: 'warning'
+    base_log_dir: "checkpoints/"
+    tool: "TensorBoard"
+    project_name: "default"
+    stderrthreshold: "warning"
   callbacks:
     ModelCheckpoint:
-      monitor: 'val/acc'
-      mode: 'max'
+      monitor: "val/acc"
+      mode: "max"
       save_top_k: 1
       save_optimizer_state: False
     ConfusionMatrixCallback:
       normalize: True
-      cmap: 'Blues'
+      cmap: "Blues"
       every_n_epochs: 2
     LearningRateMonitor:
       every_n_epochs: 1
@@ -32,7 +32,7 @@ model:
   hparams:
     c_hid: 32
     latent_dim: 10
-    act_fn: 'gelu'
+    act_fn: "gelu"
     batch_norm: True
 optimizer:
   name: adam
@@ -44,6 +44,6 @@ optimizer:
     warmup_steps: 100
 dataset:
   name: CIFAR10
-  data_dir: 'data/'
+  data_dir: "data/"
   batch_size: 128
   num_workers: 4

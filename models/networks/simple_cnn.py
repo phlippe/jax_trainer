@@ -1,15 +1,15 @@
+from typing import Callable
+
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import flax.linen as nn
-
-from typing import Callable
 
 
 class SimpleEncoder(nn.Module):
-    c_hid : int
-    latent_dim : int
-    act_fn : str
-    batch_norm : bool = False
+    c_hid: int
+    latent_dim: int
+    act_fn: str
+    batch_norm: bool = False
 
     @nn.compact
     def __call__(self, x, train=True, **kwargs):
