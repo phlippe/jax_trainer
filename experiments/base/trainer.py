@@ -24,7 +24,7 @@ import pickle
 from absl import flags, logging
 
 from experiments.base.optimizer_constructor import build_optimizer
-from experiments.base.loggers import Logger
+from experiments.base.loggers import Logger, LogMetricMode, LogFreq, LogMode
 from datasets.utils import Batch
 import experiments.callbacks as callbacks
 from experiments.callbacks import ModelCheckpoint
@@ -309,6 +309,12 @@ class TrainerModule:
             state = state.apply_gradients(grads=grads,
                                           mutable_variables=mutable_vars,
                                           rng=next_rng)
+            if self.trainer_config.get('log_grad_norm', False):
+                grad_norm = optax.global_norm(grads)
+                metrics['optimizer/grad_global_norm'] = grad_norm
+                metrics['optimizer/grad_global_norm_max'] = {'value': grad_norm, 
+                                                            'mode': LogMetricMode.MAX, 
+                                                            'log_freq': LogFreq.EPOCH}
             return state, metrics
         return train_step
     

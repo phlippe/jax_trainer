@@ -251,7 +251,11 @@ class Logger:
                 val = jnp.concatenate(val, axis=0)
             if isinstance(val, jnp.ndarray) and val.size == 1:
                 val = val.item()
-            save_key = f'{self.logging_mode}/{key}'
+            
+            if '/' not in key:
+                save_key = f'{self.logging_mode}/{key}'
+            else:
+                save_key = key
             final_metrics[save_key] = val
         return final_metrics
             
