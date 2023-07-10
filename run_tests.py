@@ -1,3 +1,5 @@
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 from absl.testing import absltest
 from absl import logging
 from tests.test_optimizer import *

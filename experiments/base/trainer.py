@@ -638,20 +638,30 @@ class TrainerModule:
         Returns:
           A Trainer object with model loaded from the checkpoint folder.
         """
-        # TODO: Write a test for it
+        # Load config
         metadata_file = os.path.join(checkpoint, 'metadata/metadata')
         assert os.path.isfile(metadata_file), 'Could not find metadata file'
         with open(metadata_file, 'rb') as f:
             config = ConfigDict(json.load(f))
+        # Adjust log dir to where its loaded from
+        adjusted_checkpoint = checkpoint.split('/')
+        if adjusted_checkpoint[-1] == '':
+            adjusted_checkpoint = adjusted_checkpoint[:-1]
+        if len(adjusted_checkpoint) < 2:
+            raise ValueError('Checkpoint path must be at least two levels deep')
+        config.trainer.logger.log_dir = os.path.join(*adjusted_checkpoint[:-2])  
+        # Load example input
         if exmp_input is None:
             if exmp_input_file is None:
                 exmp_input_file = os.path.join(checkpoint, 'exmp_input.pkl')
             assert os.path.isfile(exmp_input_file), 'Could not find example input file'
             with open(exmp_input_file, 'rb') as f:
                 exmp_input = pickle.load(f)
+        # Create trainer
         trainer = cls(exmp_input=exmp_input,
                       trainer_config=config.trainer,
                       model_config=config.model,
                       optimizer_config=config.optimizer)
+        # Load model
         trainer.load_model()
         return trainer
