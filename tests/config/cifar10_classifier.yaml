@@ -1,8 +1,8 @@
 seed: 42
 num_gpus: 1
 trainer:
-  name: base.TrainerModule
-  train_epochs: 500
+  name: ImgClassifierTrainer
+  train_epochs: 5
   check_val_every_n_epoch: 1
   debug: False
   enable_progress_bar: True
@@ -10,22 +10,28 @@ trainer:
   seed: 42
   seed_eval: 0
   logger:
-    log_dir: None
-    base_log_dir: 'tests/checkpoints/'
-    tool: 'TensorBoard'
-    project_name: 'default'
+    log_dir: tests/checkpoints/BuildTrainerTest/
+    tool: TensorBoard
+    project_name: default
+    log_file_verbosity: warning
   callbacks:
     ModelCheckpoint:
-      monitor: 'val/acc'
-      mode: 'max'
+      monitor: val/acc
+      mode: max
       save_top_k: 1
       save_optimizer_state: False
+    ConfusionMatrixCallback:
+      normalize: True
+      cmap: Blues
+      every_n_epochs: 2
+    LearningRateMonitor:
+      every_n_epochs: 1
 model:
   name: SimpleEncoder
   hparams:
     c_hid: 32
     latent_dim: 10
-    act_fn: 'gelu'
+    act_fn: gelu
     batch_norm: True
 optimizer:
   name: adam
@@ -37,6 +43,6 @@ optimizer:
     warmup_steps: 100
 dataset:
   name: CIFAR10
-  data_dir: 'data/'
+  data_dir: data/
   batch_size: 128
   num_workers: 4

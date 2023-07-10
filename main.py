@@ -45,7 +45,7 @@ def main(_):
     eval_metrics = trainer.train_model(train_loader=dataset.train_loader, 
                                         val_loader=dataset.val_loader, 
                                         test_loader=dataset.test_loader,
-                                        num_epochs=5)
+                                        num_epochs=cfg.trainer.train_epochs)
 
 
 if __name__ == '__main__':

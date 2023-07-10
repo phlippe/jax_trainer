@@ -15,7 +15,7 @@ class TestBuildOptimizer(absltest.TestCase):
             'nesterov': True
         }
         optimizer_config = ConfigDict(optimizer_config)
-        optimizer = build_optimizer(optimizer_config)
+        optimizer, _ = build_optimizer(optimizer_config)
         self.assertTrue(isinstance(optimizer, optax.GradientTransformation))
 
     def test_build_optimizer_adam(self):
@@ -25,7 +25,7 @@ class TestBuildOptimizer(absltest.TestCase):
             'beta1': 0.9
         }
         optimizer_config = ConfigDict(optimizer_config)
-        optimizer = build_optimizer(optimizer_config)
+        optimizer, _ = build_optimizer(optimizer_config)
         self.assertTrue(isinstance(optimizer, optax.GradientTransformation))
 
     def test_build_optimizer_adamw(self):
@@ -36,7 +36,7 @@ class TestBuildOptimizer(absltest.TestCase):
             'weight_decay': 0.01
         }
         optimizer_config = ConfigDict(optimizer_config)
-        optimizer = build_optimizer(optimizer_config)
+        optimizer, _ = build_optimizer(optimizer_config)
         self.assertTrue(isinstance(optimizer, optax.GradientTransformation))
 
     def test_build_optimizer_schedule_constant(self):
@@ -49,7 +49,7 @@ class TestBuildOptimizer(absltest.TestCase):
             }
         }
         optimizer_config = ConfigDict(optimizer_config)
-        optimizer = build_optimizer(optimizer_config)
+        optimizer, _ = build_optimizer(optimizer_config)
         self.assertTrue(isinstance(optimizer, optax.GradientTransformation))
 
     def test_build_optimizer_schedule_cosine_decay(self):
@@ -64,7 +64,7 @@ class TestBuildOptimizer(absltest.TestCase):
             }
         }
         optimizer_config = ConfigDict(optimizer_config)
-        optimizer = build_optimizer(optimizer_config)
+        optimizer, _ = build_optimizer(optimizer_config)
         self.assertTrue(isinstance(optimizer, optax.GradientTransformation))
 
     def test_build_optimizer_schedule_exponential_decay(self):
@@ -80,7 +80,7 @@ class TestBuildOptimizer(absltest.TestCase):
             }
         }
         optimizer_config = ConfigDict(optimizer_config)
-        optimizer = build_optimizer(optimizer_config)
+        optimizer, _ = build_optimizer(optimizer_config)
         self.assertTrue(isinstance(optimizer, optax.GradientTransformation))
     
     def test_build_optimizer_schedule_warmup_cosine_decay(self):
@@ -96,7 +96,7 @@ class TestBuildOptimizer(absltest.TestCase):
             }
         }
         optimizer_config = ConfigDict(optimizer_config)
-        optimizer = build_optimizer(optimizer_config)
+        optimizer, _ = build_optimizer(optimizer_config)
         self.assertTrue(isinstance(optimizer, optax.GradientTransformation))
 
     def test_build_optimizer_gradient_clipping(self):
@@ -111,7 +111,7 @@ class TestBuildOptimizer(absltest.TestCase):
             'grad_clip_value': 0.1
         }
         optimizer_config = ConfigDict(optimizer_config)
-        optimizer = build_optimizer(optimizer_config)
+        optimizer, _ = build_optimizer(optimizer_config)
         self.assertTrue(isinstance(optimizer, optax.GradientTransformation))
 
     def test_build_optimizer_weight_decay(self):
@@ -122,7 +122,7 @@ class TestBuildOptimizer(absltest.TestCase):
             'weight_decay': 0.01
         }
         optimizer_config = ConfigDict(optimizer_config)
-        optimizer = build_optimizer(optimizer_config)
+        optimizer, _ = build_optimizer(optimizer_config)
         self.assertTrue(isinstance(optimizer, optax.GradientTransformation))
 
 

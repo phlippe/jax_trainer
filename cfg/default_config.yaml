@@ -2,12 +2,13 @@ seed: 42
 num_gpus: 1
 trainer:
   name: ImgClassifierTrainer
-  train_epochs: 500
+  train_epochs: 5
   check_val_every_n_epoch: 1
   debug: False
   enable_progress_bar: True
   tabulate_model: True
   seed_eval: 0
+  log_grad_norm: False
   logger:
     log_dir: None
     base_log_dir: 'checkpoints/'

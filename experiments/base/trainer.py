@@ -116,10 +116,11 @@ class TrainerModule:
         # Save config and exmp_input
         log_dir = self.logger.log_dir
         self.log_dir = log_dir
+        self.trainer_config.logger.log_dir = log_dir
         os.makedirs(os.path.join(log_dir, 'metrics/'), exist_ok=True)
         logging.get_absl_handler().use_absl_log_file(log_dir=log_dir,
                                                      program_name='absl_logging')
-        logging.set_verbosity(logging.INFO)
+        logging.set_verbosity(logger_config.get('log_file_verbosity', logging.INFO))
         logging.set_stderrthreshold(logger_config.get('stderrthreshold', 'warning'))
         if not os.path.isfile(os.path.join(log_dir, 'config.yaml')):
             with open(os.path.join(log_dir, 'config.yaml'), 'w') as f:
@@ -392,6 +393,23 @@ class TrainerModule:
         self.logger.finalize('success')
         return all_eval_metrics
     
+    def test_model(self,
+                   test_loader : Iterator,
+                   apply_callbacks : bool = False,
+                   epoch_idx : int = 0) -> Dict[str, Any]:
+        """
+        Tests the model on the given test set.
+
+        Args:
+          test_loader: Data loader of the test set.
+          apply_callbacks: If True, the callbacks will be applied.
+          epoch_idx: The epoch index to use for the callbacks and logging.
+        """
+        test_metrics = self.eval_model(test_loader, mode='test', epoch_idx=epoch_idx)
+        if apply_callbacks:
+            self.on_test_epoch_end(test_metrics, epoch_idx=epoch_idx)
+        return test_metrics
+    
     def test_functions(self,
                        train_loader : Iterator,
                        val_loader : Iterator):
@@ -607,7 +625,8 @@ class TrainerModule:
     @classmethod
     def load_from_checkpoint(cls,
                              checkpoint : str,
-                             exmp_input : Batch = None) -> Any:
+                             exmp_input : Batch = None,
+                             exmp_input_file : str = None) -> Any:
         """
         Creates a Trainer object with same hyperparameters and loaded model from
         a checkpoint directory.
@@ -625,9 +644,10 @@ class TrainerModule:
         with open(metadata_file, 'rb') as f:
             config = ConfigDict(json.load(f))
         if exmp_input is None:
-            exmp_file = os.path.join(checkpoint, 'exmp_input.pkl')
-            assert os.path.isfile(exmp_file), 'Could not find example input file'
-            with open(exmp_file, 'rb') as f:
+            if exmp_input_file is None:
+                exmp_input_file = os.path.join(checkpoint, 'exmp_input.pkl')
+            assert os.path.isfile(exmp_input_file), 'Could not find example input file'
+            with open(exmp_input_file, 'rb') as f:
                 exmp_input = pickle.load(f)
         trainer = cls(exmp_input=exmp_input,
                       trainer_config=config.trainer,
