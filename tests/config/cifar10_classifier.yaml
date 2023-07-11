@@ -27,7 +27,7 @@ trainer:
     LearningRateMonitor:
       every_n_epochs: 1
 model:
-  name: SimpleEncoder
+  name: tests.models.SimpleEncoder
   hparams:
     c_hid: 32
     latent_dim: 10
@@ -42,7 +42,7 @@ optimizer:
     name: warmup_cosine_decay
     warmup_steps: 100
 dataset:
-  name: CIFAR10
+  constructor: jax_trainer.datasets.build_cifar10_datasets
   data_dir: data/
   batch_size: 128
   num_workers: 4
