@@ -63,18 +63,18 @@ class TrainerModule:
         model initialization, training loop, etc.
 
         Args:
-          model_class: The class of the model that should be trained.
-          model_hparams: A dictionary of all hyperparameters of the model. Is
-            used as input to the model when created.
-          optimizer_hparams: A dictionary of all hyperparameters of the optimizer.
-            Used during initialization of the optimizer.
-          exmp_input: Input to the model for initialization and tabulate.
-          seed: Seed to initialize PRNG.
-          logger_params: A dictionary containing the specification of the logger.
-          enable_progress_bar: If False, no progress bar is shown.
-          debug: If True, no jitting is applied. Can be helpful for debugging.
-          check_val_every_n_epoch: The frequency with which the model is evaluated
-            on the validation set.
+            model_class: The class of the model that should be trained.
+            model_hparams: A dictionary of all hyperparameters of the model. Is
+                used as input to the model when created.
+            optimizer_hparams: A dictionary of all hyperparameters of the optimizer.
+                Used during initialization of the optimizer.
+            exmp_input: Input to the model for initialization and tabulate.
+            seed: Seed to initialize PRNG.
+            logger_params: A dictionary containing the specification of the logger.
+            enable_progress_bar: If False, no progress bar is shown.
+            debug: If True, no jitting is applied. Can be helpful for debugging.
+            check_val_every_n_epoch: The frequency with which the model is evaluated
+                on the validation set.
         """
         super().__init__()
         self.trainer_config = trainer_config
@@ -100,7 +100,7 @@ class TrainerModule:
         """Creates the model class from the model_config.
 
         Args:
-          model_config: A dictionary containing the model configuration.
+            model_config: A dictionary containing the model configuration.
         """
         # Create model
         model_class = resolve_import_from_string(model_config.name)
@@ -111,7 +111,7 @@ class TrainerModule:
         """Initializes a logger and creates a logging directory.
 
         Args:
-          logger_params: A dictionary containing the specification of the logger.
+            logger_params: A dictionary containing the specification of the logger.
         """
         full_config = ConfigDict(
             {
@@ -145,6 +145,7 @@ class TrainerModule:
                 f.write(tab)
 
     def init_callbacks(self):
+        """Initializes the callbacks defined in the trainer config."""
         self.callbacks = []
         for name in self.trainer_config.callbacks:
             logging.info(f"Initializing callback {name}")
@@ -161,7 +162,7 @@ class TrainerModule:
         """Creates an initial training state with newly generated network parameters.
 
         Args:
-          exmp_input: An input to the model with which the shapes are inferred.
+            exmp_input: An input to the model with which the shapes are inferred.
         """
         # Prepare PRNG and input
         model_rng = random.PRNGKey(self.trainer_config.seed)
@@ -186,10 +187,10 @@ class TrainerModule:
         """Returns a dictionary of PRNGKey for init and tabulate.
 
         Args:
-          rng: The current PRNGKey.
+            rng: The current PRNGKey.
 
         Returns:
-          Dict of PRNG Keys
+            Dict of PRNG Keys
         """
         return {"params": rng}
 
@@ -197,11 +198,11 @@ class TrainerModule:
         """The model initialization call.
 
         Args:
-          exmp_input: An input to the model with which the shapes are inferred.
-          init_rng: A jax.random.PRNGKey.
+            exmp_input: An input to the model with which the shapes are inferred.
+            init_rng: A jax.random.PRNGKey.
 
         Returns:
-          The initialized variable dictionary.
+            The initialized variable dictionary.
         """
         rngs = self.get_model_rng(init_rng)
         exmp_input = self.batch_to_input(exmp_input)
@@ -211,7 +212,7 @@ class TrainerModule:
         """Prints a summary of the Module represented as table.
 
         Args:
-          exmp_input: An input to the model with which the shapes are inferred.
+            exmp_input: An input to the model with which the shapes are inferred.
         """
         rngs = self.get_model_rng(random.PRNGKey(0))
         exmp_input = self.batch_to_input(exmp_input)
@@ -223,8 +224,8 @@ class TrainerModule:
         """Initializes the optimizer and learning rate scheduler.
 
         Args:
-          num_epochs: Number of epochs the model will be trained for.
-          num_train_steps_per_epoch: Number of training steps per epoch.
+            num_epochs: Number of epochs the model will be trained for.
+            num_train_steps_per_epoch: Number of training steps per epoch.
         """
         BuilderClass = self.optimizer_config.get("builder", OptimizerBuilder)
         if isinstance(BuilderClass, str):
@@ -277,10 +278,7 @@ class TrainerModule:
         train: bool = True,
         **kwargs,
     ) -> Tuple[Any, Dict]:
-        """The model apply function that is used for evaluation.
-
-        This function needs to be overwritten by a subclass.
-        """
+        """The model apply function that can be used in the loss function for simplification."""
         rngs = self.get_model_rng(rng)
         variables = {"params": params}
         mutable_keys = False
@@ -372,14 +370,14 @@ class TrainerModule:
         """Starts a training loop for the given number of epochs.
 
         Args:
-          train_loader: Data loader of the training set.
-          val_loader: Data loader of the validation set.
-          test_loader: If given, best model will be evaluated on the test set.
-          num_epochs: Number of epochs for which to train the model.
+            train_loader: Data loader of the training set.
+            val_loader: Data loader of the validation set.
+            test_loader: If given, best model will be evaluated on the test set.
+            num_epochs: Number of epochs for which to train the model.
 
         Returns:
-          A dictionary of the train, validation and evt. test metrics for the
-          best model on the validation set.
+            A dictionary of the train, validation and evt. test metrics for the
+            best model on the validation set.
         """
         # Create optimizer and the scheduler for the given number of epochs
         self.init_optimizer(num_epochs, len(train_loader))
@@ -413,9 +411,9 @@ class TrainerModule:
         """Tests the model on the given test set.
 
         Args:
-          test_loader: Data loader of the test set.
-          apply_callbacks: If True, the callbacks will be applied.
-          epoch_idx: The epoch index to use for the callbacks and logging.
+            test_loader: Data loader of the test set.
+            apply_callbacks: If True, the callbacks will be applied.
+            epoch_idx: The epoch index to use for the callbacks and logging.
         """
         test_metrics = self.eval_model(test_loader, mode="test", epoch_idx=epoch_idx)
         if apply_callbacks:
@@ -446,12 +444,12 @@ class TrainerModule:
         """Trains a model for one epoch.
 
         Args:
-          train_loader: Data loader of the training set.
-          epoch_idx: Current epoch index.
+            train_loader: Data loader of the training set.
+            epoch_idx: Current epoch index.
 
         Returns:
-          A dictionary of the average training metrics over all batches
-          for logging.
+            A dictionary of the average training metrics over all batches
+            for logging.
         """
         # Train model for one epoch, and log avg loss and accuracy
         self.logger.start_epoch(epoch_idx, mode="train")
@@ -465,13 +463,13 @@ class TrainerModule:
         """Evaluates the model on a dataset.
 
         Args:
-          data_loader: Data loader of the dataset to evaluate on.
-          mode: Whether 'val' or 'test'
-          epoch_idx: Current epoch index.
+            data_loader: Data loader of the dataset to evaluate on.
+            mode: Whether 'val' or 'test'
+            epoch_idx: Current epoch index.
 
         Returns:
-          A dictionary of the evaluation metrics, averaged over data points
-          in the dataset.
+            A dictionary of the evaluation metrics, averaged over data points
+            in the dataset.
         """
         # Test model on all images of a data loader and return avg loss
         self.logger.start_epoch(epoch_idx, mode=mode)
@@ -485,12 +483,12 @@ class TrainerModule:
         """Wraps an iterator in a progress bar tracker (tqdm) if the progress bar is enabled.
 
         Args:
-          iterator: Iterator to wrap in tqdm.
-          kwargs: Additional arguments to tqdm.
+            iterator: Iterator to wrap in tqdm.
+            kwargs: Additional arguments to tqdm.
 
         Returns:
-          Wrapped iterator if progress bar is enabled, otherwise same iterator
-          as input.
+            Wrapped iterator if progress bar is enabled, otherwise same iterator
+            as input.
         """
         if self.trainer_config.enable_progress_bar:
             return tqdm(iterator, **kwargs)
@@ -520,7 +518,7 @@ class TrainerModule:
         similar.
 
         Args:
-          epoch_idx: Index of the training epoch that has started.
+            epoch_idx: Index of the training epoch that has started.
         """
         logging.info(f"Starting training epoch {epoch_idx}")
         for callback in self.callbacks:
@@ -531,7 +529,7 @@ class TrainerModule:
         similar.
 
         Args:
-          epoch_idx: Index of the training epoch that has finished.
+            epoch_idx: Index of the training epoch that has finished.
         """
         logging.info(f"Finished training epoch {epoch_idx}")
         for callback in self.callbacks:
@@ -542,11 +540,11 @@ class TrainerModule:
         and evaluation.
 
         Args:
-          epoch_idx: Index of the training epoch at which validation was performed.
-          eval_metrics: A dictionary of the validation metrics. New metrics added to
-            this dictionary will be logged as well.
-          val_loader: Data loader of the validation set, to support additional
-            evaluation.
+            epoch_idx: Index of the training epoch at which validation was performed.
+            eval_metrics: A dictionary of the validation metrics. New metrics added to
+                this dictionary will be logged as well.
+            val_loader: Data loader of the validation set, to support additional
+                evaluation.
         """
         logging.info(f"Finished validation epoch {epoch_idx}")
         for callback in self.callbacks:
@@ -557,11 +555,11 @@ class TrainerModule:
         evaluation.
 
         Args:
-          epoch_idx: Index of the training epoch at which testing was performed.
-          test_metrics: A dictionary of the test metrics. New metrics added to
-            this dictionary will be logged as well.
-          test_loader: Data loader of the test set, to support additional
-            evaluation.
+            epoch_idx: Index of the training epoch at which testing was performed.
+            test_metrics: A dictionary of the test metrics. New metrics added to
+                this dictionary will be logged as well.
+            test_loader: Data loader of the test set, to support additional
+                evaluation.
         """
         logging.info(f"Finished test epoch {epoch_idx}")
         for callback in self.callbacks:
@@ -583,7 +581,7 @@ class TrainerModule:
         """Restores the state of the trainer from a state dictionary.
 
         Args:
-          state_dict: State dictionary to restore from.
+            state_dict: State dictionary to restore from.
         """
         logging.info("Restoring trainer state with keys " + str(state_dict.keys()))
         state_dict.pop("metrics")
@@ -600,7 +598,7 @@ class TrainerModule:
         """Returns a model with parameters bound to it. Enables an easier inference access.
 
         Returns:
-          The model with parameters and evt. batch statistics bound to it.
+            The model with parameters and evt. batch statistics bound to it.
         """
         params = {"params": self.state.params}
         if self.state.mutable_variables is not None:
@@ -615,11 +613,11 @@ class TrainerModule:
         directory.
 
         Args:
-          checkpoint: Folder in which the checkpoint and hyperparameter file is stored.
-          exmp_input: An input to the model for shape inference.
+            checkpoint: Folder in which the checkpoint and hyperparameter file is stored.
+            exmp_input: An input to the model for shape inference.
 
         Returns:
-          A Trainer object with model loaded from the checkpoint folder.
+            A Trainer object with model loaded from the checkpoint folder.
         """
         # Load config
         metadata_file = os.path.join(checkpoint, "metadata/metadata")

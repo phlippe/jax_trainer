@@ -5,11 +5,18 @@ from jax_trainer.callbacks.callback import Callback
 
 
 class LearningRateMonitor(Callback):
+    """Callback to monitor the learning rate."""
+
     def __init__(self, config, trainer, data_module):
         super().__init__(config, trainer, data_module)
         self.log_dir = self.trainer.log_dir
 
     def _on_training_epoch_start(self, epoch_idx):
+        """Logs the learning rate at the beginning of each training epoch.
+
+        Args:
+            epoch_idx: Index of the current epoch.
+        """
         schedule = self.trainer.lr_schedule
         if schedule is None:
             logging.warning("No learning rate schedule found.")

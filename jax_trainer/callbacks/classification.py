@@ -9,6 +9,8 @@ from jax_trainer.callbacks.callback import Callback
 
 
 class ConfusionMatrixCallback(Callback):
+    """Callback to visualize the confusion matrix."""
+
     def __init__(self, config, trainer, data_module):
         super().__init__(config, trainer, data_module)
         self.log_dir = self.trainer.log_dir

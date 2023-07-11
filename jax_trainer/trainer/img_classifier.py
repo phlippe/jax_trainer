@@ -5,18 +5,35 @@ import jax.numpy as jnp
 import optax
 from jax import random
 
-from jax_trainer.datasets import Batch
+from jax_trainer.datasets import SupervisedBatch
 from jax_trainer.logger import LogFreq, LogMetricMode, LogMode
 from jax_trainer.trainer import TrainerModule, TrainState
 
 
 class ImgClassifierTrainer(TrainerModule):
-    def batch_to_input(self, batch: Batch) -> Any:
+    def batch_to_input(self, batch: SupervisedBatch) -> Any:
         return batch.input
 
     def loss_function(
-        self, params: Any, state: TrainState, batch: Batch, rng: random.PRNGKey, train: bool = True
+        self,
+        params: Any,
+        state: TrainState,
+        batch: SupervisedBatch,
+        rng: random.PRNGKey,
+        train: bool = True,
     ) -> Tuple[Any, Tuple[Any, Dict]]:
+        """Loss function for image classification.
+
+        Args:
+            params: Parameters of the model.
+            state: State of the trainer.
+            batch: Batch of data. Assumes structure of SupervisedBatch or subclasses.
+            rng: Key for random number generation.
+            train: Whether the model is in training mode.
+
+        Returns:
+            Tuple of loss and tuple of mutable variables and metrics.
+        """
         imgs = batch.input
         labels = batch.target
         logits, mutable_variables = self.model_apply(

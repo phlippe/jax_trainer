@@ -8,6 +8,8 @@ from jax_trainer.callbacks.callback import Callback
 
 
 class ModelCheckpoint(Callback):
+    """Callback to save model parameters and mutable variables to the logging directory."""
+
     def __init__(self, config, trainer, data_module):
         super().__init__(config, trainer, data_module)
         self.log_dir = self.trainer.log_dir
@@ -44,7 +46,12 @@ class ModelCheckpoint(Callback):
         self.save_model(eval_metrics, epoch_idx)
 
     def save_model(self, eval_metrics, epoch_idx):
-        """Saves model parameters and batch statistics to the logging directory."""
+        """Saves model parameters and batch statistics to the logging directory.
+
+        Args:
+            eval_metrics: Dictionary of evaluation metrics.
+            epoch_idx: Index of the current epoch.
+        """
         save_items = {"params": self.trainer.state.params, "metadata": self.metadata}
         if self.trainer.state.mutable_variables is not None:
             save_items["mutable_variables"] = self.trainer.state.mutable_variables
@@ -58,7 +65,14 @@ class ModelCheckpoint(Callback):
         self.manager.save(epoch_idx, save_items, metrics=eval_metrics)
 
     def load_model(self, epoch_idx=-1):
-        """Loads model parameters and batch statistics from the logging directory."""
+        """Loads model parameters and variables from the logging directory.
+
+        Args:
+            epoch_idx: Index of the epoch to load. If -1, loads the best epoch.
+
+        Returns:
+            Dictionary of loaded model parameters and additional variables.
+        """
         if epoch_idx == -1:
             epoch_idx = self.manager.best_step()
         state_dict = self.manager.restore(epoch_idx)

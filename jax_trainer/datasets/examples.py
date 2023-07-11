@@ -15,11 +15,10 @@ def build_cifar10_datasets(dataset_config: ConfigDict):
     """Builds CIFAR10 datasets.
 
     Args:
-      dataset_config: Configuration for the dataset.
+        dataset_config: Configuration for the dataset.
 
     Returns:
-      train_dataset: CIFAR10 training dataset.
-      test_dataset: CIFAR10 test dataset.
+        DatasetModule object.
     """
     normalize = dataset_config.get("normalize", True)
     transform = transforms.Compose(
@@ -66,7 +65,10 @@ def build_mnist_datasets(dataset_config: ConfigDict):
     """Builds MNIST datasets.
 
     Args:
-      dataset_config: Configuration for the dataset.
+        dataset_config: Configuration for the dataset.
+
+    Returns:
+        DatasetModule object.
     """
     normalize = dataset_config.get("normalize", True)
     transform = transforms.Compose(

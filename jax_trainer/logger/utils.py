@@ -24,6 +24,9 @@ def flatten_configdict(
     Args:
         cfg (ConfigDict): The nested config dict.
         separation_mark (str, optional): The separation mark to use. Defaults to ".".
+
+    Returns:
+        Dict: The flattened dict.
     """
     cfgdict = dict(cfg)
     keys = list(cfgdict.keys())
@@ -41,6 +44,9 @@ def get_logging_dir(logger_config: ConfigDict, full_config: ConfigDict):
     Args:
         logger_config (ConfigDict): The logger config.
         full_config (ConfigDict): The full config of the trainer. Used for getting the model name for the default logging directory.
+
+    Returns:
+        Tuple[str, str]: The logging directory and version.
     """
     # Determine logging directory
     log_dir = logger_config.get("log_dir", None)
@@ -64,6 +70,9 @@ def build_tool_logger(logger_config: ConfigDict, full_config: ConfigDict):
     Args:
         logger_config (ConfigDict): The logger config.
         full_config (ConfigDict): The full config of the trainer, to be logged.
+
+    Returns:
+        The logger tool object.
     """
     # Determine logging directory
     log_dir, version = get_logging_dir(logger_config, full_config)

@@ -5,6 +5,11 @@ from ml_collections import ConfigDict
 
 
 class OptimizerBuilder:
+    """Class for building optimizers from config.
+
+    Can be overwritten to add custom optimizers and learning rate schedules.
+    """
+
     def __init__(self, optimizer_config: ConfigDict):
         self.optimizer_config = optimizer_config
 
@@ -28,6 +33,14 @@ class OptimizerBuilder:
         return optimizer, lr_schedule
 
     def build_optimizer_function(self):
+        """Build optimizer class function from config.
+
+        By default, it supports Adam, AdamW, and SGD. To add custom optimizers, overwrite the
+        function build_extra_optimizer_function.
+
+        Returns:
+            Callable: Optimizer class function.
+        """
         # Build optimizer class
         optimizer_name = self.optimizer_config.name
         optimizer_name = optimizer_name.lower()
@@ -67,6 +80,18 @@ class OptimizerBuilder:
         raise ValueError(f"Unknown optimizer {optimizer_name}.")
 
     def build_lr_scheduler(self, num_epochs: int = 0, num_train_steps_per_epoch: int = 0):
+        """Build learning rate schedule from config.
+
+        By default, it supports constant, cosine decay, exponential decay, and warmup cosine decay.
+        To add custom learning rate schedules, overwrite the function build_extra_lr_scheduler.
+
+        Args:
+            num_epochs (int, optional): Number of epochs. Defaults to 0.
+            num_train_steps_per_epoch (int, optional): Number of training steps per epoch. Defaults to 0.
+
+        Returns:
+            Callable: Learning rate schedule function.
+        """
         # Build learning rate schedule
         lr = float(self.optimizer_config.lr)
         scheduler_config = self.optimizer_config.get("scheduler", ConfigDict())
@@ -126,6 +151,17 @@ class OptimizerBuilder:
         raise ValueError(f"Unknown learning rate schedule {scheduler_name}.")
 
     def build_gradient_transformations(self):
+        """Build gradient transformations from config.
+
+        By default, it supports gradient clipping by norm and value, and weight decay. To add custom
+        gradient transformations, overwrite this function and call super().build_gradient_transformations()
+        in it. We distinguish between pre- and post-optimizer gradient transformations. Pre-optimizer
+        gradient transformations are applied before the optimizer, e.g. gradient clipping. Post-optimizer
+        gradient transformations are applied after the optimizer.
+
+        Returns:
+            Tuple[List[Callable], List[Callable]]: Tuple of pre-optimizer and post-optimizer gradient transformations.
+        """
         # Gradient transformation
         optimizer_name = self.optimizer_config.name
         optimizer_name = optimizer_name.lower()

@@ -16,6 +16,11 @@ from jax_trainer.logger.utils import build_tool_logger
 
 
 class Logger:
+    """Logger class to log metrics, images, etc.
+
+    to Tensorboard or Weights and Biases.
+    """
+
     def __init__(self, config: ConfigDict, full_config: ConfigDict):
         """Logger class to log metrics, images, etc. to Tensorboard or Weights and Biases.
 
@@ -47,6 +52,9 @@ class Logger:
                 'mode': LogMetricMode
             }
         }
+
+        Returns:
+            Dict[str, Dict[str, Any]]: The default dict for metrics.
         """
         return defaultdict(lambda: {"value": 0, "mode": "mean"})
 
@@ -343,4 +351,5 @@ class Logger:
 
     @property
     def log_dir(self):
+        """Returns the logging directory of the logger."""
         return self.logger.log_dir
