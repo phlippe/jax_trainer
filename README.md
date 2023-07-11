@@ -193,7 +193,7 @@ The `trainer` section configures the `TrainerModule` and the callbacks. The `Tra
   - `log_file_verbosity` (optional): Verbosity of the logging file. Possible values are `debug`, `info`, `warning`, and `error`. By default, the verbosity is set to `info`.
   - `stderrthreshold` (optional): Verbosity of the logging to stderr. Possible values are `debug`, `info`, `warning`, and `error`. By default, the verbosity is set to `warning`.
 
-The `callbacks` section configures the callbacks. The key of a callback is its name (if its a default one in `jax_trainer`) or the path to an self-implemented callback. Each callback has its own config and parameters. The following callbacks are pre-defined:
+The `callbacks` section configures the callbacks. The key of a callback is its name (if its a default one in `jax_trainer`) or arbitrary description. In case of the latter, the attrbitue `class` needs to be added, with the respective class path, e.g. `class: mymodule.MyCallback`. Each callback has its own config and parameters. The following callbacks are pre-defined:
 
 - `ModelCheckpoint`: Saves the model and optimizer state after validation.
   - `monitor` (optional): Metric to monitor (default: `val/loss`).

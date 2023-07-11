@@ -146,11 +146,11 @@ class TrainerModule:
         callback_configs = self.trainer_config.get("callbacks", ConfigDict())
         for name in callback_configs:
             logging.info(f"Initializing callback {name}")
-            try:
-                callback_class = getattr(callbacks, name)
-            except AttributeError:
-                callback_class = resolve_import_from_string(name)
             callback_config = callback_configs[name]
+            if callback_config.get("class_name", None) is not None:
+                callback_class = resolve_import_from_string(callback_config.class_name)
+            else:
+                callback_class = getattr(callbacks, name)
             self.callbacks.append(
                 callback_class(config=callback_config, trainer=self, data_module=None)
             )
