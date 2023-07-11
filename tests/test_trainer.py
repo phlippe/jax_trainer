@@ -1,5 +1,7 @@
 import json
+import os
 import pathlib
+import shutil
 from glob import glob
 
 import optax
@@ -61,3 +63,8 @@ class TestBuildTrainer(absltest.TestCase):
         with open("tests/checkpoints/BuildTrainerTest/metrics/test_epoch_0005.json", "rb") as f:
             orig_test_metric = json.load(f)
         self.assertAlmostEqual(test_metrics["test/acc"], orig_test_metric["test/acc"], places=4)
+
+    @classmethod
+    def tearDownClass(cls):
+        # Remove checkpoint
+        shutil.rmtree("tests/checkpoints/BuildTrainerTest")
