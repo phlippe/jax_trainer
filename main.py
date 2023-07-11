@@ -8,9 +8,8 @@ import torch
 from absl import app
 from ml_collections import ConfigDict, config_flags
 
-import experiments
-from datasets.dataset_constructor import build_dataset_module
-from experiments.base.optimizer_constructor import build_optimizer
+from jax_trainer.datasets import build_dataset_module
+from jax_trainer.utils import resolve_import_from_string
 
 _CONFIG_FILE = config_flags.DEFINE_config_file("cfg", default="cfg/default_config.py")
 
@@ -36,7 +35,7 @@ def main(_):
     # Build dataset
     dataset = build_dataset_module(cfg.dataset)
     exmp_input = next(iter(dataset.train_loader))
-    trainer_class = getattr(experiments, cfg.trainer.name)
+    trainer_class = resolve_import_from_string(cfg.trainer.name)
     trainer = trainer_class(
         trainer_config=cfg.trainer,
         model_config=cfg.model,

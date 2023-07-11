@@ -1,1 +1,0 @@
-from experiments.classifier.img_classifier import ImgClassifierTrainer
