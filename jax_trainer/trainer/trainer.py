@@ -63,24 +63,20 @@ class TrainerModule:
         model initialization, training loop, etc.
 
         Args:
-            model_class: The class of the model that should be trained.
-            model_hparams: A dictionary of all hyperparameters of the model. Is
-                used as input to the model when created.
-            optimizer_hparams: A dictionary of all hyperparameters of the optimizer.
-                Used during initialization of the optimizer.
-            exmp_input: Input to the model for initialization and tabulate.
-            seed: Seed to initialize PRNG.
-            logger_params: A dictionary containing the specification of the logger.
-            enable_progress_bar: If False, no progress bar is shown.
-            debug: If True, no jitting is applied. Can be helpful for debugging.
-            check_val_every_n_epoch: The frequency with which the model is evaluated
-                on the validation set.
+            trainer_config: A dictionary containing the trainer configuration.
+            model_config: A dictionary containing the model configuration.
+            optimizer_config: A dictionary containing the optimizer configuration.
+            exmp_input: An input to the model with which the shapes are inferred.
         """
         super().__init__()
         self.trainer_config = trainer_config
         self.model_config = model_config
         self.optimizer_config = optimizer_config
         self.exmp_input = exmp_input
+        # Default properties for trainer config
+        self.trainer_config.check_val_every_n_epoch = self.trainer_config.get(
+            "check_val_every_n_epoch", 1
+        )
         # Create empty model. Note: no parameters yet
         self.build_model(model_config)
         # Init trainer parts
@@ -104,7 +100,7 @@ class TrainerModule:
         """
         # Create model
         model_class = resolve_import_from_string(model_config.name)
-        hparams = FrozenConfigDict(model_config.hparams)
+        hparams = FrozenConfigDict(model_config.get("hparams", {}))
         self.model = model_class(**hparams)
 
     def init_logger(self, logger_config: ConfigDict):
@@ -138,7 +134,7 @@ class TrainerModule:
         if not os.path.isfile(os.path.join(log_dir, "exmp_input.pkl")):
             with open(os.path.join(log_dir, "exmp_input.pkl"), "wb") as f:
                 pickle.dump(self.exmp_input, f)
-        if self.trainer_config.tabulate_model:
+        if self.trainer_config.get("tabulate_model", True):
             tab = self.tabulate(self.exmp_input)
             logging.info("Model summary:\n" + tab)
             with open(os.path.join(log_dir, "model.txt"), "w") as f:
@@ -147,13 +143,14 @@ class TrainerModule:
     def init_callbacks(self):
         """Initializes the callbacks defined in the trainer config."""
         self.callbacks = []
-        for name in self.trainer_config.callbacks:
+        callback_configs = self.trainer_config.get("callbacks", ConfigDict())
+        for name in callback_configs:
             logging.info(f"Initializing callback {name}")
             try:
                 callback_class = getattr(callbacks, name)
             except AttributeError:
                 callback_class = resolve_import_from_string(name)
-            callback_config = self.trainer_config.callbacks[name]
+            callback_config = callback_configs[name]
             self.callbacks.append(
                 callback_class(config=callback_config, trainer=self, data_module=None)
             )
@@ -251,7 +248,7 @@ class TrainerModule:
         If self.debug is True, not jitting is applied.
         """
         train_step, eval_step = self.create_functions()
-        if self.trainer_config.debug:  # Skip jitting
+        if self.trainer_config.get("debug", False):  # Skip jitting
             logging.info("Skipping jitting due to debug=True")
             self.train_step = train_step
             self.eval_step = eval_step
@@ -390,7 +387,10 @@ class TrainerModule:
             train_metrics = self.train_epoch(train_loader, epoch_idx=epoch_idx)
             self.on_training_epoch_end(train_metrics, epoch_idx)
             # Validation every N epochs
-            if epoch_idx % self.trainer_config.check_val_every_n_epoch == 0:
+            if (
+                self.trainer_config.check_val_every_n_epoch > 0
+                and epoch_idx % self.trainer_config.check_val_every_n_epoch == 0
+            ):
                 eval_metrics = self.eval_model(val_loader, mode="val", epoch_idx=epoch_idx)
                 all_eval_metrics[epoch_idx] = eval_metrics
                 self.on_validation_epoch_end(eval_metrics, epoch_idx)
@@ -490,7 +490,7 @@ class TrainerModule:
             Wrapped iterator if progress bar is enabled, otherwise same iterator
             as input.
         """
-        if self.trainer_config.enable_progress_bar:
+        if self.trainer_config.get("enable_progress_bar", True):
             return tqdm(iterator, **kwargs)
         else:
             return iterator
