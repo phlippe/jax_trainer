@@ -16,13 +16,98 @@ pip install -e .
 
 ## Usage
 
-TODO: Write a simple example and point to the examples folder.
+In the following, we will go through the main API choices in the library. In most cases, the user will only need to implement a loss function in a subclass of `TrainerModule` for each task, besides the actual models in Flax. The training loop can be further customized via callbacks. All modules are then configured via a YAML file and can be trained with a few lines of code.
 
 ### TrainerModule API
 
+The `jax_trainer.trainer.TrainerModule` has been written with the goal to be as flexible as possible while still providing a simple API for training and evaluation. It's main functions are configurable via `ConfigDict`s and can be overwritten by the user.
+
+The main aspects of the trainer is to:
+
+- **Initialize the model**: The model is initialized via the `init_model` function. This function is called at the beginning of the training and evaluation. The function can be overwritten by the user to implement custom initialization logic.
+- **Handling the TrainState**: The trainer keeps a `TrainState` which contains the model state, the optimizer state, the random number generator state, and any mutable variables. The `TrainState` is updated after each training step and can be used to resume training from a checkpoint.
+- **Logging**: The trainer provides a simple logging interface by allowing the train and evaluation functions to return dictionaries of metrics to log.
+- **Saving and loading checkpoints**: The trainer provides functions to save and load checkpoints. The checkpoints are saved as `TrainState`s and can be used to resume training or to evaluate a model. A pre-trained model can also be loaded by simply calling `TrainerModule.load_from_checkpoint`, similar to the API in Lightning.
+- **Training and evaluation**: The trainer provides functions to train and evaluate a model. The training and evaluation loops can be extended via callbacks, which are called at different points during the training and evaluation.
+
+As a user, the main function that needs to be implemented for each individual task is `loss_function(...)`. This function takes as input the model parameters and state, the batch of data, a random number generator key, and a boolean indicating whether its training or not. The function needs to return the loss, as well as a tuple of mutable variables and optional metrics. The `TrainerModule` then takes care of the rest, which includes wrapping it into a training and evaluation function, performing gradient transformations, and calling it in a loop. Additionally, to provide a unified interface with other functions like initialization, the subclass needs to implement `batch_to_input` which, given a batch, returns the input to the model. The following example shows a simple trainer module for image classification:
+
+```python
+class ImgClassifierTrainer(TrainerModule):
+
+    def batch_to_input(self, batch: SupervisedBatch) -> Any:
+        return batch.input
+
+    def loss_function(
+        self,
+        params: Any,
+        state: TrainState,
+        batch: SupervisedBatch,
+        rng: random.PRNGKey,
+        train: bool = True,
+    ) -> Tuple[Any, Tuple[Any, Dict]]:
+        imgs = batch.input
+        labels = batch.target
+        logits, mutable_variables = self.model_apply(
+            params=params, state=state, input=imgs, rng=rng, train=train
+        )
+        loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels).mean()
+        acc = (logits.argmax(axis=-1) == labels).mean()
+        metrics = {"acc": acc}
+        return loss, (mutable_variables, metrics)
+```
+
+### Logging API
+
+The `metrics` dictionary returned by the loss function is used for logging. By default, the logger supports to log values every *N* training steps and/or per epoch. For more options on the logger, see the configuration documentation below.
+
+Further, the logging of each metric can be customized by providing additional options in the `metrics` dictionary. For each metric, the following options are available:
+
+- `mode`: The mode of the metric describes how it should be aggregated over the epoch or batches. The different options are summarized in the `jax_trainer.logger.LogMetricMode` enum. Currently, the following modes are available:
+  - `LogMetricMode.MEAN`: The mean of the metric is logged.
+  - `LogMetricMode.SUM`: The sum of the metric is logged.
+  - `LogMetricMode.SINGLE`: A single value of the metric is used, namely the last one logged.
+  - `LogMetricMode.MAX`: The max of the metric is logged.
+  - `LogMetricMode.MIN`: The min of the metric is logged.
+  - `LogMetricMode.STD`: The standard deviation of the mtric is logged.
+  - `LogMetricMode.CONCAT`: The values of the metric are concatenated. Note that in this case, the metric is not logged to the tool of choice (e.g. Tensorboard or WandB), but is only provided in the full metric dictionary, which can be used as input to callbacks.
+- `log_freq`: The frequency of logging the metric. The options are summarized in `jax_trainer.logger.LogFreq` and are the following:
+  - `LogFreq.EPOCH`: The metric is logged only once per epoch.
+  - `LogFreq.STEP`: The metric is logged only per *N* steps.
+  - `LogFreq.ANY`: The metric is logged both per epoch and per *N* steps.
+- `log_mode`: The training mode in which the metric should be logged. This allows for different metrics to be logged during training, validation and/or testing. The options are summarized in the enum `jax_trainer.logger.LogMode` with the options:
+  - `LogMode.TRAIN`: The metric is logged during training.
+  - `LogMode.VAL`: The metric is logged during validation.
+  - `LogMode.TEST`: The metric is logged during testing.
+  - `LogMode.EVAL`: The metric is logged during both validation and testing.
+  - `LogMode.ANY`: The metric is logged during any of the above modes.
+
 ### Callback API
 
+The `TrainerModule` provides a callback API which is similar to the one in Lightning. The callbacks are called at different points during the training and evaluation. Each callback can implement the following methods:
+
+- `on_training_start`: Called at the beginning of the training.
+- `on_training_end`: Called at the end of the training.
+- `on_filtered_training_epoch_start`: Called at the beginning of each training epoch.
+- `on_filtered_training_epoch_end`: Called at the end of each training epoch.
+- `on_filtered_validation_epoch_start`: Called at the beginning of the validation.
+- `on_filtered_validation_epoch_end`: Called at the end of the validation.
+- `on_test_epoch_start`: Called at the beginning of the testing.
+- `on_test_epoch_end`: Called at the end of the testing.
+
+The training and validation functions with `filtered` in the name are only called every *N* epochs, where *N* is the value of `every_n_epochs` in the callback configuration.
+
+The following callbacks are pre-defined:
+
+- `ModelCheckpoint`: Saves the model and optimizer state after validation. This checkpoint can be used to resume training or to evaluate the model. It is implemented using `orbax` and is similar to the `ModelCheckpoint` in Lightning.
+- `LearningRateMonitor`: Logs the learning rate at the beginning of each epoch. This is similar to the `LearningRateMonitor` in Lightning.
+- `ConfusionMatrixCallback`: As an example for a custom callback for classification, this callback logs the confusion matrix of a classifier after validation and testing. This callback requires the metric key `conf_matrix` to be logged.
+
+For configuring the callbacks, also for custom callbacks, see the configuration documentation below.
+
 ### Dataset API
+
+The dataset API abstracts the data loading with PyTorch, using numpy arrays for storage. Each dataset needs to provide a train, validation and test loader. As return type, we use `flax.struct.dataclass`es, which are similar to PyTorch's `NamedTuple`s. These dataclasses can be used in jit-compiled functions and are therefore a good fit for JAX. Additionally, each batch should define a `size` attribute, which is used for taking the correct average across batches in evaluation. For an example, see the `jax_trainer.datasets.examples` module.
 
 ## Configuration
 

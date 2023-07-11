@@ -42,7 +42,7 @@ class ModelCheckpoint(Callback):
             options=options,
         )
 
-    def _on_validation_epoch_end(self, eval_metrics, epoch_idx):
+    def on_filtered_validation_epoch_end(self, eval_metrics, epoch_idx):
         self.save_model(eval_metrics, epoch_idx)
 
     def save_model(self, eval_metrics, epoch_idx):

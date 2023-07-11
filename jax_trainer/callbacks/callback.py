@@ -39,9 +39,9 @@ class Callback:
         """
         if epoch_idx % self.every_n_epochs != 0:
             return
-        self._on_training_epoch_start(epoch_idx)
+        self.on_filtered_training_epoch_start(epoch_idx)
 
-    def _on_training_epoch_start(self, epoch_idx):
+    def on_filtered_training_epoch_start(self, epoch_idx):
         """Called at the beginning of each `every_n_epochs` training epoch. To be implemented by
         subclasses.
 
@@ -59,14 +59,28 @@ class Callback:
         """
         if epoch_idx % self.every_n_epochs != 0:
             return
-        self._on_training_epoch_end(train_metrics, epoch_idx)
+        self.on_filtered_training_epoch_end(train_metrics, epoch_idx)
 
-    def _on_training_epoch_end(self, train_metrics, epoch_idx):
+    def on_filtered_training_epoch_end(self, train_metrics, epoch_idx):
         """Called at the end of each `every_n_epochs` training epoch. To be implemented by
         subclasses.
 
         Args:
             train_metrics: Dictionary of training metrics of the current epoch.
+        """
+        pass
+
+    def on_validation_epoch_start(self, epoch_idx):
+        """Called at the beginning of validation."""
+        if epoch_idx % self.every_n_epochs != 0:
+            return
+        self.on_filtered_validation_epoch_start(epoch_idx)
+
+    def on_filtered_validation_epoch_start(self, epoch_idx):
+        """Called at the beginning of `every_n_epochs` validation. To be implemented by subclasses.
+
+        Args:
+            epoch_idx: Index of the current epoch.
         """
         pass
 
@@ -79,9 +93,9 @@ class Callback:
         """
         if epoch_idx % self.every_n_epochs != 0:
             return
-        self._on_validation_epoch_end(eval_metrics, epoch_idx)
+        self.on_filtered_validation_epoch_end(eval_metrics, epoch_idx)
 
-    def _on_validation_epoch_end(self, eval_metrics, epoch_idx):
+    def on_filtered_validation_epoch_end(self, eval_metrics, epoch_idx):
         """Called at the end of each `every_n_epochs` validation epoch. To be implemented by
         subclasses.
 
@@ -91,17 +105,14 @@ class Callback:
         """
         pass
 
-    def on_test_epoch_end(self, test_metrics, epoch_idx):
-        """Called at the end of each test epoch.
+    def on_test_epoch_start(self):
+        """Called at the beginning of testing.
 
-        Args:
-            test_metrics: Dictionary of test metrics of the current epoch.
-            epoch_idx: Index of the current epoch.
+        To be implemented by subclasses.
         """
-        # We apply it to every epoch, since we don't know when the test set is evaluated.
-        self._on_test_epoch_end(test_metrics, epoch_idx)
+        pass
 
-    def _on_test_epoch_end(self, test_metrics, epoch_idx):
+    def on_test_epoch_end(self, test_metrics, epoch_idx):
         """Called at the end of each test epoch. To be implemented by subclasses.
 
         Args:

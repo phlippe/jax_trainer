@@ -15,7 +15,7 @@ class ConfusionMatrixCallback(Callback):
         super().__init__(config, trainer, data_module)
         self.log_dir = self.trainer.log_dir
 
-    def _on_validation_epoch_end(self, eval_metrics, epoch_idx):
+    def on_filtered_validation_epoch_end(self, eval_metrics, epoch_idx):
         return self._visualize_confusion_matrix(eval_metrics, epoch_idx)
 
     def _on_test_epoch_end(self, test_metrics, epoch_idx):

@@ -391,6 +391,7 @@ class TrainerModule:
                 self.trainer_config.check_val_every_n_epoch > 0
                 and epoch_idx % self.trainer_config.check_val_every_n_epoch == 0
             ):
+                self.on_validation_epoch_start(epoch_idx)
                 eval_metrics = self.eval_model(val_loader, mode="val", epoch_idx=epoch_idx)
                 all_eval_metrics[epoch_idx] = eval_metrics
                 self.on_validation_epoch_end(eval_metrics, epoch_idx)
@@ -398,6 +399,7 @@ class TrainerModule:
         # Test best model if possible
         if test_loader is not None:
             self.load_model()
+            self.on_test_epoch_start(epoch_idx)
             test_metrics = self.eval_model(test_loader, mode="test", epoch_idx=epoch_idx)
             self.on_test_epoch_end(test_metrics, epoch_idx)
             all_eval_metrics["test"] = test_metrics
@@ -535,6 +537,17 @@ class TrainerModule:
         for callback in self.callbacks:
             callback.on_training_epoch_end(train_metrics, epoch_idx)
 
+    def on_validation_epoch_start(self, epoch_idx: int):
+        """Method called at the start of each validation epoch. Can be used for additional logging
+        or similar.
+
+        Args:
+            epoch_idx: Index of the training epoch at which validation was started.
+        """
+        logging.info(f"Starting validation epoch {epoch_idx}")
+        for callback in self.callbacks:
+            callback.on_validation_epoch_start(epoch_idx)
+
     def on_validation_epoch_end(self, eval_metrics: Dict[str, Any], epoch_idx: int):
         """Method called at the end of each validation epoch. Can be used for additional logging
         and evaluation.
@@ -549,6 +562,17 @@ class TrainerModule:
         logging.info(f"Finished validation epoch {epoch_idx}")
         for callback in self.callbacks:
             callback.on_validation_epoch_end(eval_metrics, epoch_idx)
+
+    def on_test_epoch_start(self, epoch_idx: int):
+        """Method called at the start of each test epoch. Can be used for additional logging or
+        similar.
+
+        Args:
+            epoch_idx: Index of the training epoch at which testing was started.
+        """
+        logging.info(f"Starting test epoch {epoch_idx}")
+        for callback in self.callbacks:
+            callback.on_test_epoch_start(epoch_idx)
 
     def on_test_epoch_end(self, test_metrics: Dict[str, Any], epoch_idx: int):
         """Method called at the end of each test epoch. Can be used for additional logging and

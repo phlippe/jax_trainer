@@ -11,7 +11,7 @@ class LearningRateMonitor(Callback):
         super().__init__(config, trainer, data_module)
         self.log_dir = self.trainer.log_dir
 
-    def _on_training_epoch_start(self, epoch_idx):
+    def on_filtered_training_epoch_start(self, epoch_idx):
         """Logs the learning rate at the beginning of each training epoch.
 
         Args:
