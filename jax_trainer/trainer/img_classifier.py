@@ -7,7 +7,7 @@ from jax import random
 
 from jax_trainer.datasets import SupervisedBatch
 from jax_trainer.logger import LogFreq, LogMetricMode, LogMode
-from jax_trainer.trainer import TrainerModule, TrainState
+from jax_trainer.trainer.trainer import TrainerModule, TrainState
 
 
 class ImgClassifierTrainer(TrainerModule):

@@ -105,7 +105,7 @@ class Callback:
         """
         pass
 
-    def on_test_epoch_start(self):
+    def on_test_epoch_start(self, epoch_idx):
         """Called at the beginning of testing.
 
         To be implemented by subclasses.
