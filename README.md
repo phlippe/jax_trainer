@@ -4,6 +4,8 @@ This repository is a work in progress. The goal is to provide a Lightning-like A
 
 For handling hyperparameters, this repository makes use of [ml-collections](https://ml-collections.readthedocs.io/en/latest/). This library provides a hierarchical configuration system, which is used to configure the `TrainerModule` and the callbacks.
 
+For an example usage, see our [template repository](https://github.com/phlippe/jax_trainer_template).
+
 ## Installation
 
 In future, the package will be available on PyPI. For now, you can install it from source:
@@ -16,7 +18,7 @@ pip install -e .
 
 ## Usage
 
-In the following, we will go through the main API choices in the library. In most cases, the user will only need to implement a loss function in a subclass of `TrainerModule` for each task, besides the actual models in Flax. The training loop can be further customized via callbacks. All modules are then configured via a YAML file and can be trained with a few lines of code.
+In the following, we will go through the main API choices in the library. In most cases, the user will only need to implement a loss function in a subclass of `TrainerModule` for each task, besides the actual models in Flax. The training loop can be further customized via callbacks. All modules are then configured via a YAML file and can be trained with a few lines of code. For an example, see our [template repository](https://github.com/phlippe/jax_trainer_template).
 
 ### TrainerModule API
 
