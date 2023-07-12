@@ -279,3 +279,16 @@ The `dataset` section configures the dataset and the data loading. The following
 - `batch_size` (optional): Batch size to use during training, validation and testing (default: `128`).
 - `num_workers` (optional): Number of workers to use for data loading (default: `4`).
 - `seed` (optional): Seed for the data loading (default: `42`).
+
+## Contributing
+
+Contributions are welcome! Before contributing code, please install the pre-commit hooks with:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+This will run the linter and formatter on every commit.
+
+If you have any questions, feel free to open an issue or contact me directly.
