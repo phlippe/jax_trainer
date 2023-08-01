@@ -1,1 +1,1 @@
-from tests.models.networks import SimpleEncoder
+from tests.models.networks import SimpleClassifier

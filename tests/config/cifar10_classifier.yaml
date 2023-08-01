@@ -27,17 +27,21 @@ trainer:
     LearningRateMonitor:
       every_n_epochs: 1
 model:
-  name: tests.models.SimpleEncoder
+  name: tests.models.SimpleClassifier
   hparams:
     c_hid: 32
-    latent_dim: 10
+    num_classes: 10
     act_fn: gelu
     batch_norm: True
 optimizer:
   name: adam
   lr: 1e-3
-  weight_decay: 0
-  gradient_clip_norm: 10.0
+  params:
+    beta1: 0.9
+    beta2: 0.999
+  transforms:
+    weight_decay: 0
+    gradient_clip_norm: 10.0
   scheduler:
     name: warmup_cosine_decay
     warmup_steps: 100
@@ -45,4 +49,4 @@ dataset:
   constructor: jax_trainer.datasets.build_cifar10_datasets
   data_dir: data/
   batch_size: 128
-  num_workers: 4
+  num_workers: 0
