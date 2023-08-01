@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Any, Union
 
 import numpy as np
@@ -29,4 +30,22 @@ def normalize_transform(mean: Union[np.ndarray, float] = 0.0, std: Union[np.ndar
     Returns:
         Normalization function.
     """
-    return lambda x: (x - mean.astype(x.dtype)) / std.astype(x.dtype)
+    if isinstance(mean, float):
+        mean = np.array(mean)
+    if isinstance(std, float):
+        std = np.array(std)
+    return partial(normalize, mean=mean, std=std)
+
+
+def normalize(x: np.ndarray, mean: np.ndarray = 0.0, std: np.ndarray = 1.0):
+    """Normalize numpy array.
+
+    Args:
+        x: Array to be normalized.
+        mean: Mean of the normalization.
+        std: Standard deviation of the normalization.
+
+    Returns:
+        Normalized array.
+    """
+    return (x - mean.astype(x.dtype)) / std.astype(x.dtype)

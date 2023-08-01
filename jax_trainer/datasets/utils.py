@@ -33,16 +33,19 @@ def build_data_loaders(
     loaders = []
     if not isinstance(train, (list, tuple)):
         train = [train for _ in datasets]
+    batch_size = config.get("batch_size", 128)
+    num_workers = config.get("num_workers", 4)
+    seed = config.get("seed", 42)
     for dataset, is_train in zip(datasets, train):
         loader = data.DataLoader(
             dataset,
-            batch_size=config.get("batch_size", 128),
+            batch_size=batch_size,
             shuffle=is_train,
             drop_last=is_train,
             collate_fn=collate_fn,
-            num_workers=config.get("num_workers", 4),
-            persistent_workers=is_train,
-            generator=torch.Generator().manual_seed(config.get("seed", 42)),
+            num_workers=num_workers,
+            persistent_workers=is_train and (num_workers > 0),
+            generator=torch.Generator().manual_seed(seed),
         )
         loaders.append(loader)
     return loaders
