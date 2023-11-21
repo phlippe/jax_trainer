@@ -1,7 +1,12 @@
+from typing import Iterable, Optional, SupportsIndex
+
 import numpy as np
 import torch.utils.data as data
 from flax.struct import dataclass
 from ml_collections import ConfigDict
+
+Dataset = data.Dataset | SupportsIndex
+DataLoader = data.DataLoader | Iterable
 
 
 @dataclass
@@ -9,12 +14,12 @@ class DatasetModule:
     """Data module class that holds the datasets and data loaders."""
 
     config: ConfigDict
-    train: data.Dataset
-    val: data.Dataset
-    test: data.Dataset
-    train_loader: data.DataLoader
-    val_loader: data.DataLoader
-    test_loader: data.DataLoader
+    train: Optional[Dataset]
+    val: Optional[Dataset]
+    test: Optional[Dataset]
+    train_loader: Optional[DataLoader]
+    val_loader: Optional[DataLoader]
+    test_loader: Optional[DataLoader]
 
 
 @dataclass
