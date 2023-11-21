@@ -26,6 +26,10 @@ trainer:
       every_n_epochs: 2
     LearningRateMonitor:
       every_n_epochs: 1
+    JAXProfiler:
+      every_n_minutes: 60
+      first_step: 10
+      profile_n_steps: 20
 model:
   name: tests.models.SimpleEncoder
   hparams:

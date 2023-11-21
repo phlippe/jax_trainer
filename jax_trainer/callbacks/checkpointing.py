@@ -1,7 +1,8 @@
 import os
 from typing import Any, Dict
 
-import orbax
+import jax
+import orbax.checkpoint as ocp
 from flax.training import orbax_utils
 
 from jax_trainer.callbacks.callback import Callback
@@ -15,7 +16,7 @@ class ModelCheckpoint(Callback):
         self.log_dir = self.trainer.log_dir
         assert self.config.get("monitor", None) is not None, "Please specify a metric to monitor."
 
-        options = orbax.checkpoint.CheckpointManagerOptions(
+        options = ocp.CheckpointManagerOptions(
             max_to_keep=self.config.get("save_top_k", 1),
             best_fn=lambda m: m[self.config.monitor],
             best_mode=self.config.get("mode", "min"),
@@ -24,20 +25,20 @@ class ModelCheckpoint(Callback):
             create=True,
         )
         checkpointers = {
-            "params": orbax.checkpoint.PyTreeCheckpointer(),
-            "metadata": orbax.checkpoint.Checkpointer(orbax.checkpoint.JsonCheckpointHandler()),
+            "params": ocp.PyTreeCheckpointer(),
+            "metadata": ocp.Checkpointer(ocp.JsonCheckpointHandler()),
         }
         if self.trainer.state.mutable_variables is not None:
-            checkpointers["mutable_variables"] = orbax.checkpoint.PyTreeCheckpointer()
+            checkpointers["mutable_variables"] = ocp.PyTreeCheckpointer()
         if self.config.get("save_optimizer_state", False):
-            checkpointers["optimizer"] = orbax.checkpoint.PyTreeCheckpointer()
+            checkpointers["optimizer"] = ocp.PyTreeCheckpointer()
         self.metadata = {
             "trainer": self.trainer.trainer_config.to_dict(),
             "model": self.trainer.model_config.to_dict(),
             "optimizer": self.trainer.optimizer_config.to_dict(),
         }
-        self.manager = orbax.checkpoint.CheckpointManager(
-            directory=os.path.join(self.log_dir, "checkpoints/"),
+        self.manager = ocp.CheckpointManager(
+            directory=os.path.abspath(os.path.join(self.log_dir, "checkpoints/")),
             checkpointers=checkpointers,
             options=options,
         )

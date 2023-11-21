@@ -20,6 +20,8 @@ from typing import (
     Union,
 )
 
+import flax
+
 # JAX/Flax libraries
 import jax
 import jax.numpy as jnp
@@ -143,6 +145,7 @@ class TrainerModule:
     def init_callbacks(self):
         """Initializes the callbacks defined in the trainer config."""
         self.callbacks = []
+        self.train_step_callbacks = []
         callback_configs = self.trainer_config.get("callbacks", ConfigDict())
         for name in callback_configs:
             logging.info(f"Initializing callback {name}")
@@ -151,9 +154,10 @@ class TrainerModule:
                 callback_class = resolve_import_from_string(callback_config.class_name)
             else:
                 callback_class = getattr(callbacks, name)
-            self.callbacks.append(
-                callback_class(config=callback_config, trainer=self, data_module=None)
-            )
+            callback = callback_class(config=callback_config, trainer=self, data_module=None)
+            self.callbacks.append(callback)
+            if hasattr(callback, "on_training_step"):
+                self.train_step_callbacks.append(callback)
 
     def init_model(self, exmp_input: Batch):
         """Creates an initial training state with newly generated network parameters.
@@ -203,7 +207,10 @@ class TrainerModule:
         """
         rngs = self.get_model_rng(init_rng)
         exmp_input = self.batch_to_input(exmp_input)
-        return self.model.init(rngs, exmp_input, train=True)
+        variables = self.model.init(rngs, exmp_input, train=True)
+        if not isinstance(variables, flax.core.frozen_dict.FrozenDict):
+            variables = flax.core.frozen_dict.freeze(variables)
+        return variables
 
     def tabulate(self, exmp_input: Batch):
         """Prints a summary of the Module represented as table.
@@ -456,8 +463,11 @@ class TrainerModule:
         # Train model for one epoch, and log avg loss and accuracy
         self.logger.start_epoch(epoch_idx, mode="train")
         for batch in self.tracker(train_loader, desc="Training", leave=False):
-            self.state, step_metrics = self.train_step(self.state, batch)
+            with jax.profiler.StepTraceAnnotation(f"train_step_{self.state.step}"):
+                self.state, step_metrics = self.train_step(self.state, batch)
             self.logger.log_step(step_metrics, element_count=batch.size)
+            for callback in self.train_step_callbacks:
+                callback.on_training_step(epoch_idx, self.state.step)
         metrics = self.logger.end_epoch()
         return metrics
 
