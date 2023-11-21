@@ -170,7 +170,11 @@ class TrainerModule:
         model_rng, init_rng = random.split(model_rng)
         # Run model initialization
         variables = self.run_model_init(exmp_input, init_rng)
-        mutable_variables, params = variables.pop("params")
+        if isinstance(variables, flax.core.FrozenDict):
+            mutable_variables, params = variables.pop("params")
+        else:
+            params = variables.pop("params")
+            mutable_variables = variables
         if len(mutable_variables) == 0:
             mutable_variables = None
         # Create default state. Optimizer is initialized later

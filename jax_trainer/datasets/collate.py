@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Any, Callable, NamedTuple, Sequence, Union
 
 import numpy as np
@@ -39,6 +40,19 @@ def batch_collate(tuple_class: NamedTuple, batch: Sequence[Any]):
     return tuple_class(size, *batch)
 
 
+def numpy_batch_collate(tuple_class: NamedTuple, batch: Sequence[Any]):
+    """Wrapper function to combine numpy_collate and batch_collate into a single function.
+
+    Args:
+        tuple_class: Batch class to be constructed. Can be a dataclass or a NamedTuple.
+        batch: List of inputs.
+
+    Returns:
+        Batch object of inputs.
+    """
+    return batch_collate(tuple_class, numpy_collate(batch))
+
+
 def build_batch_collate(tuple_class: NamedTuple):
     """Wrapper function to combine numpy_collate and batch_collate into a single function.
 
@@ -48,4 +62,4 @@ def build_batch_collate(tuple_class: NamedTuple):
     Returns:
         Collate function to combine list of inputs to batch object of inputs.
     """
-    return lambda batch: batch_collate(tuple_class, numpy_collate(batch))
+    return partial(numpy_batch_collate, tuple_class)

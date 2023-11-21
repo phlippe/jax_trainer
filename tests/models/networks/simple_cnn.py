@@ -5,9 +5,9 @@ import jax
 import jax.numpy as jnp
 
 
-class SimpleEncoder(nn.Module):
+class SimpleClassifier(nn.Module):
     c_hid: int
-    latent_dim: int
+    num_classes: int
     act_fn: str
     batch_norm: bool = False
 
@@ -24,5 +24,6 @@ class SimpleEncoder(nn.Module):
                 x = nn.BatchNorm(use_running_average=not train)(x)
             x = act_fn(x)
         x = x.reshape(x.shape[0], -1)  # Image grid to single feature vector
-        x = nn.Dense(features=self.latent_dim)(x)
+        x = nn.Dense(features=self.num_classes)(x)
+        x = nn.log_softmax(x)
         return x

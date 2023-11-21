@@ -152,8 +152,11 @@ model:
 optimizer:
   name: adam
   lr: 1e-3
-  weight_decay: 0
-  gradient_clip_norm: 10.0
+  params:
+    beta1: 0.9
+  transforms:
+    weight_decay: 0
+    gradient_clip_norm: 10.0
   scheduler:
     name: warmup_cosine_decay
     warmup_steps: 100
@@ -230,7 +233,7 @@ The `optimizer` section configures the optimizer and the learning rate scheduler
   - `adamw`: AdamW optimizer.
   - `sgd`: SGD optimizer.
 
-Additionally, there are some options which are specific to the optimizer:
+Additionally, there are some options which are specific to the optimizer that can be defined in the config option `params`:
 
 - `beta1` (optional): Beta1 parameter of the Adam/AdamW optimizer (default: `0.9`).
 - `beta2` (optional): Beta2 parameter of the Adam/AdamW optimizer (default: `0.999`).
@@ -261,7 +264,7 @@ For each learning rate schedule, there are some options which are specific to th
 
 #### Gradient Transformations
 
-The gradient transformations are optional and can be used to transform the gradients before applying them to the model parameters. Each can be defined by a value (e.g. float), or a dictionary with the following options:
+The gradient transformations are optional and can be used to transform the gradients before applying them to the model parameters. They are defined under the key `transforms`. Each can be defined by a value (e.g. float), or a dictionary with the following options:
 
 - `value`: Value of the transformation.
 - `before_optimizer`: If True, the transformation is applied before the optimizer step. If False, the transformation is applied after the optimizer step (default: `True`).

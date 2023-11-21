@@ -3,6 +3,8 @@ from typing import Any, Callable
 import optax
 from ml_collections import ConfigDict
 
+from jax_trainer.utils import resolve_import_from_string
+
 
 class OptimizerBuilder:
     """Class for building optimizers from config.
@@ -44,40 +46,50 @@ class OptimizerBuilder:
         # Build optimizer class
         optimizer_name = self.optimizer_config.name
         optimizer_name = optimizer_name.lower()
+        optimizer_params = self.optimizer_config.get("params", ConfigDict())
         opt_class = None
         if optimizer_name == "adam":
             opt_class = lambda sched: optax.adam(
                 sched,
-                b1=self.optimizer_config.get("beta1", 0.9),
-                b2=self.optimizer_config.get("beta2", 0.999),
-                eps=self.optimizer_config.get("eps", 1e-8),
+                b1=optimizer_params.get("beta1", 0.9),
+                b2=optimizer_params.get("beta2", 0.999),
+                eps=optimizer_params.get("eps", 1e-8),
             )
         elif optimizer_name == "adamw":
             opt_class = lambda sched: optax.adamw(
                 sched,
-                b1=self.optimizer_config.get("beta1", 0.9),
-                b2=self.optimizer_config.get("beta2", 0.999),
-                eps=self.optimizer_config.get("eps", 1e-8),
-                weight_decay=self.optimizer_config.get("weight_decay", 0.0),
+                b1=optimizer_params.get("beta1", 0.9),
+                b2=optimizer_params.get("beta2", 0.999),
+                eps=optimizer_params.get("eps", 1e-8),
+                weight_decay=self.optimizer_config.get("transforms", ConfigDict()).get(
+                    "weight_decay", 0.0
+                ),
             )
         elif optimizer_name == "sgd":
             opt_class = lambda sched: optax.sgd(
                 sched,
-                momentum=self.optimizer_config.get("momentum", 0.0),
-                nesterov=self.optimizer_config.get("nesterov", False),
+                momentum=optimizer_params.get("momentum", 0.0),
+                nesterov=optimizer_params.get("nesterov", False),
             )
         else:
-            opt_class = self.build_extra_optimizer_function(optimizer_name=optimizer_name)
+            opt_class = self.build_extra_optimizer_function(
+                optimizer_name=optimizer_name, optimizer_params=optimizer_params
+            )
         return opt_class
 
-    def build_extra_optimizer_function(self, optimizer_name: str):
+    def build_extra_optimizer_function(self, optimizer_name: str, optimizer_params: ConfigDict):
         """Function that can be overwritten by subclasses to add custom optimizers. By default, it
         raises a ValueError.
 
         Args:
             optimizer_name (str): Name of the optimizer.
+            optimizer_params (ConfigDict): ConfigDict for optimizer parameters.
         """
-        raise ValueError(f"Unknown optimizer {optimizer_name}.")
+        try:
+            optimizer_class = resolve_import_from_string(f"optax.{optimizer_name}")
+            return lambda sched: optimizer_class(sched, **optimizer_params)
+        except ImportError:
+            raise ValueError(f"Unknown optimizer {optimizer_name}.")
 
     def build_lr_scheduler(self, num_epochs: int = 0, num_train_steps_per_epoch: int = 0):
         """Build learning rate schedule from config.
@@ -148,7 +160,11 @@ class OptimizerBuilder:
             num_epochs (int, optional): Number of epochs. Defaults to 0.
             num_train_steps_per_epoch (int, optional): Number of training steps per epoch. Defaults to 0.
         """
-        raise ValueError(f"Unknown learning rate schedule {scheduler_name}.")
+        try:
+            lr_schedule_class = resolve_import_from_string(f"optax.{scheduler_name}")
+            return lr_schedule_class(**scheduler_config)
+        except ImportError:
+            raise ValueError(f"Unknown learning rate schedule {scheduler_name}.")
 
     def build_gradient_transformations(self):
         """Build gradient transformations from config.
@@ -165,6 +181,7 @@ class OptimizerBuilder:
         # Gradient transformation
         optimizer_name = self.optimizer_config.name
         optimizer_name = optimizer_name.lower()
+        transform_config = self.optimizer_config.get("transforms", ConfigDict())
         grad_trans = {"pre": [], "post": []}
 
         def add_grad_trans(config: Any, gt_fn: Callable):
@@ -178,13 +195,11 @@ class OptimizerBuilder:
                 else:
                     grad_trans["post"].append(gt)
 
-        if self.optimizer_config.get("grad_clip_norm", None) is not None:
-            add_grad_trans(self.optimizer_config.grad_clip_norm, optax.clip_by_global_norm)
-        if self.optimizer_config.get("grad_clip_value", None) is not None:
-            add_grad_trans(self.optimizer_config.grad_clip_value, optax.clip)
-        if self.optimizer_config.get("weight_decay", 0.0) > 0.0 and optimizer_name not in [
-            "adamw"
-        ]:
-            add_grad_trans(self.optimizer_config.weight_decay, optax.add_decayed_weights)
+        if transform_config.get("grad_clip_norm", None) is not None:
+            add_grad_trans(transform_config.grad_clip_norm, optax.clip_by_global_norm)
+        if transform_config.get("grad_clip_value", None) is not None:
+            add_grad_trans(transform_config.grad_clip_value, optax.clip)
+        if transform_config.get("weight_decay", 0.0) > 0.0 and optimizer_name not in ["adamw"]:
+            add_grad_trans(transform_config.weight_decay, optax.add_decayed_weights)
 
         return grad_trans["pre"], grad_trans["post"]
