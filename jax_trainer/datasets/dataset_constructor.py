@@ -1,7 +1,7 @@
 from ml_collections import ConfigDict
 
 from jax_trainer.datasets.data_struct import DatasetModule
-from jax_trainer.utils import resolve_import_from_string
+from jax_trainer.utils import resolve_import
 
 
 def build_dataset_module(dataset_config: ConfigDict) -> DatasetModule:
@@ -13,7 +13,6 @@ def build_dataset_module(dataset_config: ConfigDict) -> DatasetModule:
     Returns:
       dataset_module: Dataset module.
     """
-    constructor = dataset_config.constructor.lower()
-    constructor = resolve_import_from_string(constructor)
+    constructor = resolve_import(dataset_config.constructor)
     dataset_module = constructor(dataset_config)
     return dataset_module

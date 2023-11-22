@@ -41,7 +41,7 @@ from jax_trainer.callbacks import ModelCheckpoint
 from jax_trainer.datasets import Batch
 from jax_trainer.logger import LogFreq, Logger, LogMetricMode, LogMode
 from jax_trainer.optimizer import OptimizerBuilder
-from jax_trainer.utils import resolve_import_from_string
+from jax_trainer.utils import resolve_import
 
 
 class TrainState(train_state.TrainState):
@@ -101,7 +101,7 @@ class TrainerModule:
             model_config: A dictionary containing the model configuration.
         """
         # Create model
-        model_class = resolve_import_from_string(model_config.name)
+        model_class = resolve_import(model_config.name)
         hparams = FrozenConfigDict(model_config.get("hparams", {}))
         self.model = model_class(**hparams)
 
@@ -118,9 +118,7 @@ class TrainerModule:
                 "optimizer": self.optimizer_config,
             }
         )
-        LoggerClass = logger_config.get("class", Logger)
-        if isinstance(LoggerClass, str):
-            LoggerClass = resolve_import_from_string(LoggerClass)
+        LoggerClass = resolve_import(logger_config.get("class", Logger))
         self.logger = LoggerClass(logger_config, full_config)
         # Save config and exmp_input
         log_dir = self.logger.log_dir
@@ -151,7 +149,7 @@ class TrainerModule:
             logging.info(f"Initializing callback {name}")
             callback_config = callback_configs[name]
             if callback_config.get("class_name", None) is not None:
-                callback_class = resolve_import_from_string(callback_config.class_name)
+                callback_class = resolve_import(callback_config.class_name)
             else:
                 callback_class = getattr(callbacks, name)
             callback = callback_class(config=callback_config, trainer=self, data_module=None)

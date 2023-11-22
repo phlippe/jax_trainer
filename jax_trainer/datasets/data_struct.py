@@ -32,6 +32,21 @@ class Batch:
     size: int
     # Add any additional batch information here
 
+    def __getitem__(self, key):
+        vals = {}
+        if isinstance(key, int):
+            vals["size"] = 1
+        for k, v in self.__dict__.items():
+            if k == "size":
+                continue
+            if isinstance(v, np.ndarray):
+                vals[k] = v[key]
+                if "size" not in vals:
+                    vals["size"] = vals[k].shape[0]
+            else:
+                vals[k] = v
+        return self.__class__(**vals)
+
 
 @dataclass
 class SupervisedBatch(Batch):
