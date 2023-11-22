@@ -1,4 +1,5 @@
 import importlib
+import inspect
 import sys
 from typing import Any
 
@@ -21,3 +22,7 @@ def resolve_import_from_string(import_string: str) -> Any:
     else:
         resolved_class = getattr(sys.modules[__name__], import_string)
     return resolved_class
+
+
+def class_to_name(x: Any) -> str | Any:
+    return (inspect.getmodule(x).__name__ + "." + x.__name__) if inspect.isclass(x) else x

@@ -486,9 +486,12 @@ class TrainerModule:
         """
         # Test model on all images of a data loader and return avg loss
         self.logger.start_epoch(epoch_idx, mode=mode)
+        step_metrics = None
         for batch in self.tracker(data_loader, desc=mode.capitalize(), leave=False):
             step_metrics = self.eval_step(self.state, batch)
             self.logger.log_step(step_metrics, element_count=batch.size)
+        if step_metrics is None:
+            logging.warning(f"No batches in {mode} loader at epoch {epoch_idx}.")
         metrics = self.logger.end_epoch(save_metrics=True)
         return metrics
 
