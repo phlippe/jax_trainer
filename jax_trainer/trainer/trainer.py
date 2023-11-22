@@ -234,8 +234,7 @@ class TrainerModule:
             num_train_steps_per_epoch: Number of training steps per epoch.
         """
         BuilderClass = self.optimizer_config.get("builder", OptimizerBuilder)
-        if isinstance(BuilderClass, str):
-            BuilderClass = resolve_import_from_string(BuilderClass)
+        BuilderClass = resolve_import(BuilderClass)
         builder = BuilderClass(self.optimizer_config)
         optimizer, lr_schedule = builder.build_optimizer(
             num_epochs=num_epochs,

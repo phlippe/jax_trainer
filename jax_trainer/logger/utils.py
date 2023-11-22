@@ -55,7 +55,9 @@ def get_logging_dir(logger_config: ConfigDict, full_config: ConfigDict):
     if not log_dir:
         base_log_dir = logger_config.get("base_log_dir", "checkpoints/")
         # Prepare logging
-        model_name = str(full_config.model.name)
+        model_name = full_config.model.name
+        if not isinstance(model_name, str):
+            model_name = model_name.__name__
         log_dir = os.path.join(base_log_dir, model_name.split(".")[-1])
         if logger_config.get("logger_name", None) is not None:
             log_dir = os.path.join(log_dir, logger_config.logger_name)

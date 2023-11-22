@@ -1,1 +1,1 @@
-from jax_trainer.utils.imports import resolve_import_from_string, resolve_import
+from jax_trainer.utils.imports import resolve_import, resolve_import_from_string
