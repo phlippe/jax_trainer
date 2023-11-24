@@ -7,6 +7,7 @@ from typing import Any, Dict, Union
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
 from absl import logging
 from ml_collections import ConfigDict
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
@@ -69,7 +70,7 @@ class Logger:
         metrics_to_log = {}
         for metric_key in metrics:
             metric_value = metrics[metric_key]
-            if isinstance(metric_value, jnp.ndarray):
+            if isinstance(metric_value, (jnp.ndarray, np.ndarray)):
                 if metric_value.size == 1:
                     metric_value = metric_value.item()
                 else:
@@ -141,6 +142,7 @@ class Logger:
         """
         self.epoch_element_count += element_count
         self.epoch_step_count += 1
+        metrics = jax.device_get(metrics)
         for key in metrics:
             # Prepare input metric
             metric_in = metrics[key]

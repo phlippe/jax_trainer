@@ -9,6 +9,7 @@ trainer:
   tabulate_model: True
   seed: 42
   seed_eval: 0
+  log_grad_norm: True
   logger:
     log_dir: tests/checkpoints/BuildTrainerTest/
     tool: TensorBoard
@@ -30,6 +31,11 @@ trainer:
       every_n_minutes: 60
       first_step: 10
       profile_n_steps: 20
+    GradientSpikeMonitor:
+      every_n_epochs: 1
+      log_to_disk: True
+      ema_decay: 0.99
+      threshold: 3.0
 model:
   name: tests.models.SimpleClassifier
   hparams:

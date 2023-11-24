@@ -23,7 +23,7 @@ class JAXProfiler(Callback):
         self.profiler_active = False
         self.profiler_last_time = time.time()
 
-    def on_training_step(self, epoch_idx, step_idx):
+    def on_training_step(self, step_metrics, epoch_idx, step_idx):
         if self.profiler_active:
             if step_idx >= self.profile_start_step + self.profiler_n_steps:
                 self.stop_trace()

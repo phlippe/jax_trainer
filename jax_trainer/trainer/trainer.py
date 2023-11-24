@@ -473,7 +473,7 @@ class TrainerModule:
                 self.state, step_metrics = self.train_step(self.state, batch)
             self.logger.log_step(step_metrics, element_count=batch.size)
             for callback in self.train_step_callbacks:
-                callback.on_training_step(epoch_idx, self.state.step)
+                callback.on_training_step(step_metrics, epoch_idx, self.state.step)
         metrics = self.logger.end_epoch()
         return metrics
 
