@@ -38,7 +38,7 @@ from tqdm.auto import tqdm
 
 from jax_trainer import callbacks
 from jax_trainer.callbacks import ModelCheckpoint
-from jax_trainer.datasets import Batch
+from jax_trainer.datasets import Batch, DatasetModule
 from jax_trainer.logger import LogFreq, Logger, LogMetricMode, LogMode
 from jax_trainer.optimizer import OptimizerBuilder
 from jax_trainer.utils import resolve_import
@@ -185,6 +185,11 @@ class TrainerModule:
             tx=None,
             opt_state=None,
         )
+
+    def set_dataset(self, dataset: DatasetModule):
+        for callback in self.callbacks:
+            callback.set_dataset(dataset)
+        self.dataset = dataset
 
     def get_model_rng(self, rng: random.PRNGKey) -> Dict[str, random.PRNGKey]:
         """Returns a dictionary of PRNGKey for init and tabulate.

@@ -120,3 +120,11 @@ class Callback:
             epoch_idx: Index of the current epoch.
         """
         pass
+
+    def set_dataset(self, data_module: DatasetModule):
+        """Sets the data module.
+
+        Args:
+            data_module: Data module object.
+        """
+        self.data_module = data_module
