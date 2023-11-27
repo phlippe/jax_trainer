@@ -116,19 +116,23 @@ class GradientSpikeMonitor(Callback):
         # Log the spikes.
         grad_norms_num_spikes = np.sum(grad_norms_spike)
         losses_num_spikes = np.sum(losses_spike)
-        self.trainer.logger.log_scalar("spikes_grad_norms", grad_norms_num_spikes, epoch_idx)
-        self.trainer.logger.log_scalar("spikes_losses", losses_num_spikes, epoch_idx)
+        self.trainer.logger.log_scalar(
+            "optimizer/spikes_grad_norms", grad_norms_num_spikes, epoch_idx
+        )
+        self.trainer.logger.log_scalar("optimizer/spikes_losses", losses_num_spikes, epoch_idx)
         synchronous_spikes = np.sum(grad_norms_spike & losses_spike)
-        self.trainer.logger.log_scalar("spikes_synchronous", synchronous_spikes, epoch_idx)
+        self.trainer.logger.log_scalar(
+            "optimizer/spikes_synchronous", synchronous_spikes, epoch_idx
+        )
         grad_spike_before_loss = np.sum(
             grad_norms_spike & np.concatenate([[False], losses_spike[:-1]])
         )
         self.trainer.logger.log_scalar(
-            "spikes_grad_before_loss", grad_spike_before_loss, epoch_idx
+            "optimizer/spikes_grad_before_loss", grad_spike_before_loss, epoch_idx
         )
         loss_spike_before_grad = np.sum(
             losses_spike & np.concatenate([[False], grad_norms_spike[:-1]])
         )
         self.trainer.logger.log_scalar(
-            "spikes_loss_before_grad", loss_spike_before_grad, epoch_idx
+            "optimizer/spikes_loss_before_grad", loss_spike_before_grad, epoch_idx
         )

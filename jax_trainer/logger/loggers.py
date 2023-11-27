@@ -2,7 +2,7 @@ import json
 import os
 import time
 from collections import defaultdict
-from typing import Any, Dict, Union
+from typing import Any, Dict, Optional, Union
 
 import jax
 import jax.numpy as jnp
@@ -302,7 +302,14 @@ class Logger:
         with open(os.path.join(self.log_dir, f"metrics/{filename}.json"), "w") as f:
             json.dump(metrics, f, indent=4)
 
-    def log_image(self, key: str, image: jnp.ndarray, step: int = None, log_postfix: str = ""):
+    def log_image(
+        self,
+        key: str,
+        image: jnp.ndarray,
+        step: int = None,
+        log_postfix: str = "",
+        logging_mode: Optional[str] = None,
+    ):
         """Logs an image to the tool of choice (e.g. Tensorboard/Wandb).
 
         Args:
@@ -313,23 +320,30 @@ class Logger:
         """
         if step is None:
             step = self.full_step_counter
+        if logging_mode is None:
+            logging_mode = self.logging_mode
         if isinstance(image, jnp.ndarray):
             image = jax.device_get(image)
         if isinstance(self.logger, TensorBoardLogger):
             self.logger.experiment.add_image(
-                tag=f"{self.logging_mode}/{key}{log_postfix}",
+                tag=f"{logging_mode}/{key}{log_postfix}",
                 img_tensor=image,
                 global_step=step,
                 dataformats="HWC",
             )
         elif isinstance(self.logger, WandbLogger):
-            self.logger.log_image(
-                key=f"{self.logging_mode}/{key}{log_postfix}", image=image, step=step
-            )
+            self.logger.log_image(key=f"{logging_mode}/{key}{log_postfix}", image=image, step=step)
         else:
             raise ValueError(f"Unknown logger {self.logger}.")
 
-    def log_figure(self, key: str, figure: plt.Figure, step: int = None, log_postfix: str = ""):
+    def log_figure(
+        self,
+        key: str,
+        figure: plt.Figure,
+        step: int = None,
+        log_postfix: str = "",
+        logging_mode: Optional[str] = None,
+    ):
         """Logs a matplotlib figure to the tool of choice (e.g. Tensorboard/Wandb).
 
         Args:
@@ -340,14 +354,14 @@ class Logger:
         """
         if step is None:
             step = self.full_step_counter
+        if logging_mode is None:
+            logging_mode = self.logging_mode
         if isinstance(self.logger, TensorBoardLogger):
             self.logger.experiment.add_figure(
-                tag=f"{self.logging_mode}/{key}{log_postfix}", figure=figure, global_step=step
+                tag=f"{logging_mode}/{key}{log_postfix}", figure=figure, global_step=step
             )
         elif isinstance(self.logger, WandbLogger):
-            self.logger.experiment.log(
-                {f"{self.logging_mode}/{key}{log_postfix}": figure}, step=step
-            )
+            self.logger.experiment.log({f"{logging_mode}/{key}{log_postfix}": figure}, step=step)
         else:
             raise ValueError(f"Unknown logger {self.logger}.")
 
