@@ -243,17 +243,21 @@ class Logger:
             if metrics[key]["mode"] == LogMetricMode.MEAN:
                 val /= element_count
             elif metrics[key]["mode"] == LogMetricMode.STD:
-                val = jnp.std(jnp.array(val), axis=0)
+                val = np.std(np.array(val), axis=0)
             elif metrics[key]["mode"] == LogMetricMode.CONCAT:
-                val = jnp.concatenate(val, axis=0)
-            if isinstance(val, jnp.ndarray) and val.size == 1:
-                val = val.item()
+                val = np.concatenate(val, axis=0)
 
             if "/" not in key:
                 save_key = f"{self.logging_mode}/{key}"
             else:
                 save_key = key
             final_metrics[save_key] = val
+        final_metrics = jax.device_get(final_metrics)
+        for key in final_metrics:
+            val = final_metrics[key]
+            if isinstance(val, (jnp.ndarray, np.ndarray)) and val.size == 1:
+                val = val.item()
+            final_metrics[key] = val
         return final_metrics
 
     def end_epoch(self, save_metrics: bool = False):
