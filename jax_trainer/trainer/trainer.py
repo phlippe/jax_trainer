@@ -34,6 +34,7 @@ from jax import random
 
 # ML collections for config
 from ml_collections import ConfigDict, FrozenConfigDict
+from tabulate import tabulate as python_tabulate
 from tqdm.auto import tqdm
 
 from jax_trainer import callbacks
@@ -41,7 +42,7 @@ from jax_trainer.callbacks import ModelCheckpoint
 from jax_trainer.datasets import Batch, DatasetModule
 from jax_trainer.logger import LogFreq, Logger, LogMetricMode, LogMode
 from jax_trainer.optimizer import OptimizerBuilder
-from jax_trainer.utils import resolve_import
+from jax_trainer.utils import flatten_dict, resolve_import
 
 
 class TrainState(train_state.TrainState):
@@ -139,6 +140,11 @@ class TrainerModule:
             logging.info("Model summary:\n" + tab)
             with open(os.path.join(log_dir, "model.txt"), "w") as f:
                 f.write(tab)
+        if self.trainer_config.get("tabulate_params", True):
+            tab = self.tabulate_params()
+            logging.info("Parameter summary:\n" + tab)
+            with open(os.path.join(log_dir, "params.txt"), "w") as f:
+                f.write(tab)
 
     def init_callbacks(self):
         """Initializes the callbacks defined in the trainer config."""
@@ -219,7 +225,7 @@ class TrainerModule:
             variables = flax.core.frozen_dict.freeze(variables)
         return variables
 
-    def tabulate(self, exmp_input: Batch):
+    def tabulate(self, exmp_input: Batch) -> str:
         """Prints a summary of the Module represented as table.
 
         Args:
@@ -230,6 +236,33 @@ class TrainerModule:
         return self.model.tabulate(
             rngs, exmp_input, train=True, console_kwargs={"force_terminal": False}
         )
+
+    def tabulate_params(self) -> str:
+        """Prints a summary of the parameters represented as table.
+
+        Args:
+            exmp_input: An input to the model with which the shapes are inferred.
+        """
+        params = self.state.params
+        params = flatten_dict(params)
+        param_shape = jax.tree_map(lambda x: x.shape, params)
+        param_count = jax.tree_map(lambda x: np.prod(x.shape), params)
+        param_dtype = jax.tree_map(lambda x: x.dtype, params)
+        param_mean = jax.tree_map(lambda x: jnp.mean(x).item(), params)
+        param_std = jax.tree_map(lambda x: jnp.std(x).item(), params)
+        param_min = jax.tree_map(lambda x: jnp.min(x).item(), params)
+        param_max = jax.tree_map(lambda x: jnp.max(x).item(), params)
+        summary = defaultdict(list)
+        for key in sorted(list(params.keys())):
+            summary["Name"].append(key)
+            summary["Shape"].append(param_shape[key])
+            summary["Count"].append(param_count[key])
+            summary["Dtype"].append(param_dtype[key])
+            summary["Mean"].append(param_mean[key])
+            summary["Std"].append(param_std[key])
+            summary["Min"].append(param_min[key])
+            summary["Max"].append(param_max[key])
+        return python_tabulate(summary, headers="keys")
 
     def init_optimizer(self, num_epochs: int, num_train_steps_per_epoch: int):
         """Initializes the optimizer and learning rate scheduler.
