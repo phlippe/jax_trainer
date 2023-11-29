@@ -42,7 +42,7 @@ from jax_trainer.callbacks import ModelCheckpoint
 from jax_trainer.datasets import Batch, DatasetModule
 from jax_trainer.logger import LogFreq, Logger, LogMetricMode, LogMode
 from jax_trainer.optimizer import OptimizerBuilder
-from jax_trainer.utils import flatten_dict, resolve_import
+from jax_trainer.utils import class_to_name, flatten_dict, resolve_import
 
 
 class TrainState(train_state.TrainState):
@@ -130,8 +130,10 @@ class TrainerModule:
         logging.set_verbosity(logger_config.get("log_file_verbosity", logging.INFO))
         logging.set_stderrthreshold(logger_config.get("stderrthreshold", "warning"))
         if not os.path.isfile(os.path.join(log_dir, "config.yaml")):
+            config_dict = full_config.to_dict()
+            config_dict = jax.tree_map(class_to_name, config_dict)
             with open(os.path.join(log_dir, "config.yaml"), "w") as f:
-                yaml.dump(full_config.to_dict(), f)
+                yaml.dump(config_dict, f)
         if not os.path.isfile(os.path.join(log_dir, "exmp_input.pkl")):
             with open(os.path.join(log_dir, "exmp_input.pkl"), "wb") as f:
                 pickle.dump(self.exmp_input, f)

@@ -11,6 +11,8 @@ from absl import logging
 from ml_collections import ConfigDict
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 
+from jax_trainer.utils import class_to_name
+
 
 def flatten_configdict(
     cfg: ConfigDict,
@@ -83,7 +85,9 @@ def build_tool_logger(logger_config: ConfigDict, full_config: ConfigDict):
     logger_type = logger_config.get("tool", "TensorBoard").lower()
     if logger_type == "tensorboard":
         logger = TensorBoardLogger(save_dir=log_dir, version=version, name="")
-        logger.log_hyperparams(flatten_configdict(full_config))
+        hparams = flatten_configdict(full_config)
+        hparams = jax.tree_map(class_to_name, hparams)
+        logger.log_hyperparams(hparams)
     elif logger_type == "wandb":
         logger = WandbLogger(
             name=logger_config.get("project_name", None),

@@ -20,6 +20,7 @@ class DatasetModule:
     train_loader: Optional[DataLoader]
     val_loader: Optional[DataLoader]
     test_loader: Optional[DataLoader]
+    metadata: Optional[dict] = None
 
 
 @dataclass
