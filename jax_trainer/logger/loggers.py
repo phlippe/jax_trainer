@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from absl import logging
 from ml_collections import ConfigDict
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
@@ -366,6 +367,43 @@ class Logger:
             )
         elif isinstance(self.logger, WandbLogger):
             self.logger.experiment.log({f"{logging_mode}/{key}{log_postfix}": figure}, step=step)
+        else:
+            raise ValueError(f"Unknown logger {self.logger}.")
+
+    def log_embedding(
+        self,
+        key: str,
+        encodings: np.ndarray,
+        step: int = None,
+        metadata: Optional[Any] = None,
+        images: Optional[np.ndarray] = None,
+        log_postfix: str = "",
+        logging_mode: Optional[str] = None,
+    ):
+        """Logs embeddings to the tool of choice (e.g. Tensorboard/Wandb).
+
+        Args:
+            key: Name of the figure.
+            figure: Figure to log.
+            step: Step to log the image at.
+            log_postfix: Postfix to append to the log key.
+        """
+        if step is None:
+            step = self.full_step_counter
+        if logging_mode is None:
+            logging_mode = self.logging_mode
+        if isinstance(self.logger, TensorBoardLogger):
+            images = np.transpose(images, (0, 3, 1, 2))  # (N, H, W, C) -> (N, C, H, W)
+            images = torch.from_numpy(images)
+            self.logger.experiment.add_embedding(
+                tag=f"{logging_mode}/{key}{log_postfix}",
+                mat=encodings,
+                metadata=metadata,
+                label_img=images,
+                global_step=step,
+            )
+        elif isinstance(self.logger, WandbLogger):
+            logging.warning("Embedding logging not implemented for Weights and Biases.")
         else:
             raise ValueError(f"Unknown logger {self.logger}.")
 
