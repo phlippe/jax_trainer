@@ -236,7 +236,7 @@ class TrainerModule:
         rngs = self.get_model_rng(random.PRNGKey(0))
         exmp_input = self.batch_to_input(exmp_input)
         return self.model.tabulate(
-            rngs, exmp_input, train=True, console_kwargs={"force_terminal": False}
+            rngs, exmp_input, train=True, console_kwargs={"force_terminal": False, "width": 300}
         )
 
     def tabulate_params(self) -> str:
