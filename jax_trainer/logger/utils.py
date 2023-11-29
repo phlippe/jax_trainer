@@ -61,9 +61,11 @@ def get_logging_dir(logger_config: ConfigDict, full_config: ConfigDict):
         if not isinstance(model_name, str):
             model_name = model_name.__name__
         log_dir = os.path.join(base_log_dir, model_name.split(".")[-1])
-        if logger_config.get("logger_name", None) is not None:
+        if logger_config.get("logger_name", None) is not None and logger_config.logger_name != "":
             log_dir = os.path.join(log_dir, logger_config.logger_name)
-        version = None
+            version = ""
+        else:
+            version = None
     else:
         version = ""
     return log_dir, version
