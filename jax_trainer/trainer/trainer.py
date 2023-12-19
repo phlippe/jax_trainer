@@ -40,7 +40,14 @@ from tqdm.auto import tqdm
 from jax_trainer import callbacks
 from jax_trainer.callbacks import ModelCheckpoint
 from jax_trainer.datasets import Batch, DatasetModule
-from jax_trainer.logger import LogFreq, Logger, LogMetricMode, LogMode
+from jax_trainer.logger import (
+    LogFreq,
+    Logger,
+    LogMetricMode,
+    LogMode,
+    load_pytree,
+    save_pytree,
+)
 from jax_trainer.optimizer import OptimizerBuilder
 from jax_trainer.utils import class_to_name, flatten_dict, resolve_import
 
@@ -135,8 +142,7 @@ class TrainerModule:
             with open(os.path.join(log_dir, "config.yaml"), "w") as f:
                 yaml.dump(config_dict, f)
         if not os.path.isfile(os.path.join(log_dir, "exmp_input.pkl")):
-            with open(os.path.join(log_dir, "exmp_input.pkl"), "wb") as f:
-                pickle.dump(self.exmp_input, f)
+            save_pytree(self.exmp_input, os.path.join(log_dir, "exmp_input.pkl"))
         if self.trainer_config.get("tabulate_model", True):
             tab = self.tabulate(self.exmp_input)
             logging.info("Model summary:\n" + tab)
@@ -714,8 +720,7 @@ class TrainerModule:
             if exmp_input_file is None:
                 exmp_input_file = os.path.join(checkpoint, "exmp_input.pkl")
             assert os.path.isfile(exmp_input_file), "Could not find example input file"
-            with open(exmp_input_file, "rb") as f:
-                exmp_input = pickle.load(f)
+            exmp_input = load_pytree(exmp_input_file)
         # Create trainer
         trainer = cls(
             exmp_input=exmp_input,
