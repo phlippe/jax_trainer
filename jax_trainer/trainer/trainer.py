@@ -327,18 +327,21 @@ class TrainerModule:
         input: Any,
         rng: random.PRNGKey,
         train: bool = True,
+        mutable: Optional[Sequence[str]] = None,
         **kwargs,
-    ) -> Tuple[Any, Dict]:
+    ) -> Tuple[Any, Dict | None]:
         """The model apply function that can be used in the loss function for simplification."""
         rngs = self.get_model_rng(rng)
         variables = {"params": params}
-        mutable_keys = False
+        mutable_keys = [] if mutable is None else mutable
         if state.mutable_variables is not None:
             variables.update(
                 {k: state.mutable_variables[k] for k in state.mutable_variables.keys()}
             )
             if train:
-                mutable_keys = list(state.mutable_variables.keys())
+                mutable_keys += list(state.mutable_variables.keys())
+        if len(mutable_keys) == 0:
+            mutable_keys = False
         out = state.apply_fn(
             variables, input, train=train, rngs=rngs, mutable=mutable_keys, **kwargs
         )
@@ -372,6 +375,8 @@ class TrainerModule:
                     "mode": LogMetricMode.MAX,
                     "log_freq": LogFreq.EPOCH,
                 }
+                params_norm = optax.global_norm(state.params)
+                metrics["optimizer/params_global_norm"] = params_norm
             return state, metrics
 
         return train_step
