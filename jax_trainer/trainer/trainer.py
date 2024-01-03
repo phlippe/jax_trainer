@@ -369,14 +369,20 @@ class TrainerModule:
             )
             if self.trainer_config.get("log_grad_norm", False):
                 grad_norm = optax.global_norm(grads)
-                metrics["optimizer/grad_global_norm"] = grad_norm
+                metrics["optimizer/grad_global_norm"] = {
+                    "value": grad_norm,
+                    "log_freq": LogFreq.STEP,
+                }
                 metrics["optimizer/grad_global_norm_max"] = {
                     "value": grad_norm,
                     "mode": LogMetricMode.MAX,
                     "log_freq": LogFreq.EPOCH,
                 }
                 params_norm = optax.global_norm(state.params)
-                metrics["optimizer/params_global_norm"] = params_norm
+                metrics["optimizer/params_global_norm"] = {
+                    "value": params_norm,
+                    "log_freq": LogFreq.STEP,
+                }
             return state, metrics
 
         return train_step
