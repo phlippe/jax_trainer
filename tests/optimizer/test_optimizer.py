@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import optax
 from absl.testing import absltest
 from ml_collections import ConfigDict
@@ -63,20 +65,29 @@ class TestBuildOptimizer(absltest.TestCase):
         self.assertTrue(isinstance(optimizer, optax.GradientTransformation))
 
     def test_build_optimizer_schedule_exponential_decay(self):
-        optimizer_config = {
+        base_config = {
             "name": "adam",
             "lr": 0.001,
             "params": {"beta1": 0.9},
             "scheduler": {
                 "name": "exponential_decay",
-                "decay_rate": 0.1,
                 "transition_steps": 1,
                 "staircase": False,
+                "warmup_steps": 100,
+                "cooldown_steps": 10,
+                "decay_steps": 1000,
             },
         }
-        optimizer_config = ConfigDict(optimizer_config)
-        optimizer, _ = build_optimizer(optimizer_config)
-        self.assertTrue(isinstance(optimizer, optax.GradientTransformation))
+        for extra_kwargs in [{"decay_rate": 0.1}, {"end_lr": 0.0001}, {"end_lr_factor": 0.1}]:
+            for warmup_steps in [0, 100]:
+                for cooldown_steps in [0, 10]:
+                    optimizer_config = deepcopy(base_config)
+                    optimizer_config["scheduler"]["warmup_steps"] = warmup_steps
+                    optimizer_config["scheduler"]["cooldown_steps"] = cooldown_steps
+                    optimizer_config["scheduler"].update(extra_kwargs)
+                    optimizer_config = ConfigDict(optimizer_config)
+                    optimizer, _ = build_optimizer(optimizer_config)
+                    self.assertTrue(isinstance(optimizer, optax.GradientTransformation))
 
     def test_build_optimizer_schedule_warmup_cosine_decay(self):
         optimizer_config = {

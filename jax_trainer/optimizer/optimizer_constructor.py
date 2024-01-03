@@ -120,12 +120,43 @@ class OptimizerBuilder:
                 alpha=scheduler_config.get("alpha", 0.0),
             )
         elif scheduler_name == "exponential_decay":
-            lr_schedule = optax.exponential_decay(
-                init_value=lr,
-                decay_rate=scheduler_config.decay_rate,
+            # Exponential decay with cooldown and warmup
+            cooldown = scheduler_config.get("cooldown_steps", 0)
+            warmup = scheduler_config.get("warmup_steps", 0)
+            num_schedule_steps = decay_steps - cooldown - warmup
+            if scheduler_config.get("decay_rate", None) is not None:
+                decay_rate = scheduler_config.decay_rate
+            else:
+                assert decay_steps > 0, "decay_steps must be positive"
+                if scheduler_config.get("end_lr", None) is not None:
+                    end_lr_factor = scheduler_config.end_lr / lr
+                elif scheduler_config.get("end_lr_factor", None) is not None:
+                    end_lr_factor = scheduler_config.end_lr_factor
+                else:
+                    raise ValueError("Either end_lr or end_lr_factor must be specified.")
+                decay_rate = end_lr_factor ** (1.0 / num_schedule_steps)
+            lr_schedule = optax.warmup_exponential_decay_schedule(
+                init_value=0.0,
+                peak_value=lr,
+                decay_rate=decay_rate,
+                warmup_steps=warmup,
                 transition_steps=scheduler_config.get("transition_steps", 1),
                 staircase=scheduler_config.get("staircase", False),
             )
+            if cooldown > 0:
+                assert decay_steps > 0, "decay_steps must be positive"
+                end_lr = lr * (decay_rate**num_schedule_steps)
+                lr_schedule = optax.join_schedules(
+                    schedules=[
+                        lr_schedule,
+                        optax.linear_schedule(
+                            init_value=end_lr,
+                            end_value=0.0,
+                            transition_steps=cooldown,
+                        ),
+                    ],
+                    boundaries=[decay_steps - cooldown],
+                )
         elif scheduler_name == "warmup_cosine_decay":
             assert decay_steps > 0, "decay_steps must be positive"
             lr_schedule = optax.warmup_cosine_decay_schedule(
