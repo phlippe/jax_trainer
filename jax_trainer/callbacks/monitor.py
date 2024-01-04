@@ -16,10 +16,18 @@ class LearningRateMonitor(Callback):
         self.log_dir = self.trainer.log_dir
 
     def on_filtered_training_epoch_start(self, epoch_idx):
-        """Logs the learning rate at the beginning of each training epoch.
+        # Log the learning rate at the beginning of the first epoch.
+        if epoch_idx == 1:
+            self._log_lr(epoch_idx - 1)
+
+    def on_filtered_training_epoch_end(self, train_metrics, epoch_idx):
+        self._log_lr(epoch_idx)
+
+    def _log_lr(self, epoch_idx):
+        """Logs the learning rate.
 
         Args:
-            epoch_idx: Index of the current epoch.
+            epoch_idx: Index of the current epoch. Used as logging step.
         """
         schedule = self.trainer.lr_schedule
         if schedule is None:
@@ -65,8 +73,19 @@ class GradientSpikeMonitor(Callback):
     def on_training_step(self, step_metrics, epoch_idx, step_idx):
         assert "optimizer/grad_global_norm" in step_metrics
         assert "loss" in step_metrics
-        self.grad_norms_buffer.append(step_metrics["optimizer/grad_global_norm"])
-        self.losses_buffer.append(step_metrics["loss"])
+        self.grad_norms_buffer.append(
+            self._metric_to_val(step_metrics["optimizer/grad_global_norm"])
+        )
+        self.losses_buffer.append(self._metric_to_val(step_metrics["loss"]))
+
+    def _metric_to_val(self, metric):
+        if isinstance(metric, dict):
+            assert (
+                "value" in metric
+            ), f"Metric dict must contain a 'value' key, but got {list(metric.keys())}."
+            return metric["value"]
+        else:
+            return metric
 
     def on_filtered_training_epoch_end(self, train_metrics, epoch_idx):
         del train_metrics
