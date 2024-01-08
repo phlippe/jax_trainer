@@ -463,7 +463,7 @@ class TrainerModule:
         self.on_training_end()
         # Test best model if possible
         if test_loader is not None:
-            self.load_model()
+            self.load_model(raise_if_not_found=False)
             self.on_test_epoch_start(epoch_idx)
             test_metrics = self.eval_model(test_loader, mode="test", epoch_idx=epoch_idx)
             self.on_test_epoch_end(test_metrics, epoch_idx)
@@ -662,7 +662,7 @@ class TrainerModule:
         for callback in self.callbacks:
             callback.on_test_epoch_end(test_metrics, epoch_idx)
 
-    def load_model(self, epoch_idx: int = -1):
+    def load_model(self, epoch_idx: int = -1, raise_if_not_found: bool = True):
         """Loads model parameters and batch statistics from the logging directory."""
         logging.info(f"Loading model from epoch {epoch_idx}")
         state_dict = None
@@ -671,8 +671,12 @@ class TrainerModule:
                 state_dict = callback.load_model(epoch_idx)
                 break
         if state_dict is None:
-            raise ValueError("No model checkpoint callback found in callbacks.")
-        self.restore(state_dict)
+            if raise_if_not_found:
+                raise ValueError("No model checkpoint callback found in callbacks.")
+            else:
+                logging.warning("No model checkpoint callback found in callbacks.")
+        else:
+            self.restore(state_dict)
 
     def restore(self, state_dict: Dict[str, Any]):
         """Restores the state of the trainer from a state dictionary.
