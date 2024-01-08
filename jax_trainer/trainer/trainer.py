@@ -470,6 +470,8 @@ class TrainerModule:
             all_eval_metrics["test"] = test_metrics
         # Close logger
         self.logger.finalize("success")
+        for callback in self.callbacks:
+            callback.finalize("success")
         return all_eval_metrics
 
     def test_model(

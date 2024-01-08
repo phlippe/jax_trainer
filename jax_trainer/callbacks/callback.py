@@ -128,3 +128,10 @@ class Callback:
             data_module: Data module object.
         """
         self.data_module = data_module
+
+    def finalize(self, status: Optional[str] = None):
+        """Called at the end of the whole training process.
+
+        To be implemented by subclasses.
+        """
+        pass

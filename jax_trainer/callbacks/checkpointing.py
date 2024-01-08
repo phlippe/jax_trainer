@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import jax
 import orbax.checkpoint as ocp
@@ -86,3 +86,6 @@ class ModelCheckpoint(Callback):
             epoch_idx = self.manager.best_step()
         state_dict = self.manager.restore(epoch_idx)
         return state_dict
+
+    def finalize(self, status: Optional[str] = None):
+        self.manager.close()
