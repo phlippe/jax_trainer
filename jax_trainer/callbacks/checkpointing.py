@@ -88,4 +88,5 @@ class ModelCheckpoint(Callback):
         return state_dict
 
     def finalize(self, status: Optional[str] = None):
+        logging.info("Closing checkpoint manager")
         self.manager.close()
