@@ -10,7 +10,6 @@ class LogMetricMode(IntEnum):
     MAX: The maximum value of the metric is logged.
     MIN: The minimum value of the metric is logged.
     STD: The standard deviation of the metric is logged.
-    CONCAT: The metric is concatenated over the epoch.
     """
 
     MEAN = 1
@@ -19,7 +18,6 @@ class LogMetricMode(IntEnum):
     MAX = 4
     MIN = 5
     STD = 6
-    CONCAT = 7
 
 
 class LogMode(IntEnum):
