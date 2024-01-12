@@ -1,5 +1,6 @@
 from typing import Iterable, Optional, SupportsIndex
 
+import jax.numpy as jnp
 import numpy as np
 import torch.utils.data as data
 from flax.struct import dataclass
@@ -40,7 +41,7 @@ class Batch:
         for k, v in self.__dict__.items():
             if k == "size":
                 continue
-            if isinstance(v, np.ndarray):
+            if isinstance(v, (np.ndarray, jnp.ndarray)):
                 vals[k] = v[key]
                 if "size" not in vals:
                     vals["size"] = vals[k].shape[0]

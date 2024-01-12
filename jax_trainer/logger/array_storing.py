@@ -20,7 +20,7 @@ def array_to_spec(array: jnp.ndarray) -> ArraySpec:
     return ArraySpec(
         shape=array.shape,
         dtype=array.dtype,
-        device=array.device(),
+        device=str(array.device()),
         value=array.reshape(-1)[0].item(),
     )
 
