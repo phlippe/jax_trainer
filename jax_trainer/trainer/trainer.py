@@ -333,8 +333,17 @@ class TrainerModule:
             self.train_step = train_step
             self.eval_step = eval_step
         else:  # Jit
-            self.train_step = jax.jit(train_step)
-            self.eval_step = jax.jit(eval_step)
+            train_donate_argnames = ["metrics"]  # Donate metrics to avoid copying.
+            if self.trainer_config.get("donate_train_state", True):
+                train_donate_argnames.append("state")
+            self.train_step = jax.jit(
+                train_step,
+                donate_argnames=train_donate_argnames,
+            )
+            self.eval_step = jax.jit(
+                eval_step,
+                donate_argnames=["metrics"],  # Donate metrics to avoid copying.
+            )
 
     def loss_function(
         self, params: Any, state: TrainState, batch: Batch, rng: random.PRNGKey, train: bool = True
@@ -377,7 +386,9 @@ class TrainerModule:
             mutable_vars = None
         return out, mutable_vars
 
-    def create_training_function(self) -> Callable[[TrainState, Batch], Tuple[TrainState, Dict]]:
+    def create_training_function(
+        self,
+    ) -> Callable[[TrainState, Batch, FrozenDict | None], Tuple[TrainState, FrozenDict]]:
         """Creates and returns a function for the training step.
 
         The function takes as input the training state and a batch from the train loader. The
@@ -417,7 +428,9 @@ class TrainerModule:
 
         return train_step
 
-    def create_evaluation_function(self) -> Callable[[TrainState, Batch], Tuple[TrainState, Dict]]:
+    def create_evaluation_function(
+        self,
+    ) -> Callable[[TrainState, Batch, FrozenDict | None], Tuple[TrainState, FrozenDict]]:
         """Creates and returns a function for the evaluation step.
 
         The function takes as input the training state and a batch from the val/test loader. The
@@ -477,7 +490,7 @@ class TrainerModule:
         self.global_step = 0
         # Prepare training loop
         self.on_training_start()
-        self.test_functions(train_loader, val_loader)
+        self.test_eval_function(val_loader)
         all_eval_metrics = {}
         train_metrics = None
         for epoch_idx in self.tracker(range(1, num_epochs + 1), desc="Epochs"):
@@ -524,21 +537,22 @@ class TrainerModule:
             self.on_test_epoch_end(test_metrics, epoch_idx=epoch_idx)
         return test_metrics
 
-    def test_functions(self, train_loader: Iterator, val_loader: Iterator):
-        """Tests the training and evaluation functions on a few batches from the train, val and
-        test loader.
+    def test_eval_function(self, val_loader: Iterator) -> None:
+        """Tests the evaluation function on a single batch.
 
         This is useful to check if the functions have the correct signature and return the correct
-        values.
+        values. This prevents annoying errors that occur at the first evaluation step.
+
+        This function does not test the training function anymore. This is because the training
+        function is already executed in the first epoch and we change its jit signature to donate
+        the train state and metrics. Thus, executing a training step requires updating the train
+        state, which we would not want to do here. The compilation time is logged during the very
+        first training step.
+
+        Args:
+            val_loader: Data loader of the validation set.
         """
         print("Verifying evaluation function...")
-        # train_batch = next(iter(train_loader))
-        # train_metrics = self.init_train_metrics(train_batch)
-        # start_time = time.time()
-        # logging.info("Testing and compiling train_step...")
-        # _ = self.train_step(self.state, train_batch, train_metrics)
-        # logging.info(f"Successfully completed in {time.time() - start_time:.2f} seconds.")
-
         val_batch = next(iter(val_loader))
         eval_metrics = self.init_eval_metrics(val_batch)
         start_time = time.time()
