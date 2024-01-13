@@ -15,7 +15,7 @@ from ml_collections import ConfigDict
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 
 from jax_trainer.logger.enums import LogFreq, LogMetricMode, LogMode
-from jax_trainer.logger.metrics import get_metrics
+from jax_trainer.logger.metrics import HostMetrics, Metrics, get_metrics
 from jax_trainer.logger.utils import build_tool_logger
 
 
@@ -62,7 +62,7 @@ class Logger:
         """
         return defaultdict(lambda: {"value": 0, "mode": "mean"})
 
-    def log_metrics(self, metrics: Dict[str, Any], step: int, log_postfix: str = ""):
+    def log_metrics(self, metrics: HostMetrics, step: int, log_postfix: str = ""):
         """Logs a dict of metrics to the tool of choice (e.g. Tensorboard/Wandb).
 
         Args:
@@ -122,26 +122,16 @@ class Logger:
         self.epoch_idx = epoch
         self._reset_epoch_metrics()
 
-    def log_step(self, metrics: FrozenDict) -> FrozenDict:
+    def log_step(self, metrics: Metrics) -> Metrics:
         """Log metrics for a single step.
 
         Args:
-            metrics (Dict[str, Any]): The metrics that should be logged in this step.
-                If a metric is a dict, it should have the following structure:
-                {
-                    'value': float | jnp.ndarray,
-                    'mode': LogMetricMode,
-                    'log_freq': LogFreq,
-                    'log_mode': LogMode
-                }
-                The value is the actual value to log for the given metric key.
-                The mode determines how the metric is aggregated over the epoch.
-                The log_freq determines whether the metric is logged in every step,
-                at the end of the epoch, or both. The log_mode determines whether the
-                metric is logged during training, validation and/or testing. 'eval'
-                represents both validation and testing.
-            element_count (int, optional): The number of elements that were processed in this step.
-                Used for averaging metrics with batches of unequal size. Defaults to 1.
+            metrics: The metrics to log. Should follow the structure of the metrics in the metrics.py file.
+
+        Returns:
+            If the metrics are logged in this step, the metrics will be updated to reset all step-specific metrics.
+            Other metrics, e.g. for epochs, will be kept. If the metrics are not logged in this step, the metrics
+            will be returned unchanged.
         """
         self.epoch_step_count += 1
         # Log step metrics if applicable
@@ -182,12 +172,12 @@ class Logger:
         """
         self.epoch_metrics[key] = value
 
-    def _finalize_metrics(self, metrics: Dict[str, np.ndarray | float | int]):
+    def _finalize_metrics(self, metrics: HostMetrics) -> HostMetrics:
         """Finalizes the metrics of the current epoch by aggregating them over the epoch,
         corresponding to their selected mode.
 
         Args:
-            metrics (Dict[str, Dict[str, np.ndarray | float | int]]): The metrics to finalize.
+            metrics (HostMetrics): The metrics to finalize.
         """
         final_metrics = {}
         for key in metrics:
@@ -204,13 +194,19 @@ class Logger:
         return final_metrics
 
     def end_epoch(
-        self, metrics: FrozenDict, save_metrics: bool = False
-    ) -> Tuple[FrozenDict, Dict[str, Any]]:
+        self, metrics: Metrics, save_metrics: bool = False
+    ) -> Tuple[Metrics, HostMetrics]:
         """Ends the current epoch and logs the epoch metrics.
 
         Args:
-            metrics (FrozenDict): The metrics that should be logged in this epoch.
+            metrics (Metrics): The metrics that should be logged in this epoch.
             save_metrics (bool, optional): Whether to save the metrics to a file. Defaults to False.
+
+        Returns:
+            The originally passed metric dict will be updated by resetting all epoch-specific metrics.
+            Other metrics, e.g. for steps, will be kept if the epoch size is not smaller than the
+            step logging size. Otherwise, those will be reset as well. The metrics that are logged
+            in this epoch will be returned as a separate dict.
         """
         self.log_epoch_scalar("time", time.time() - self.epoch_start_time)
         metrics, epoch_metrics = get_metrics(metrics, log_freq=LogFreq.EPOCH, reset_metrics=True)

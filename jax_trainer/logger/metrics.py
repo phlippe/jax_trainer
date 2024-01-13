@@ -2,17 +2,52 @@ from typing import Any, Dict, Tuple
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from flax.core import FrozenDict, freeze, unfreeze
 
 from jax_trainer.logger.enums import LogFreq, LogMetricMode, LogMode
 
+# Immutable metrics for compilation.
+ImmutableMetricElement = FrozenDict[
+    str, jax.Array | int | float | LogMetricMode | LogFreq | LogMode
+]
+ImmutableMetrics = FrozenDict[str, ImmutableMetricElement]
+# Mutable metrics for updating/editing.
+MutableMetricElement = Dict[str, jax.Array | int | float | LogMetricMode | LogFreq | LogMode]
+MutableMetrics = Dict[str, MutableMetricElement]
+# Metrics forwarded per step.
+StepMetrics = Dict[
+    str,
+    jax.Array
+    | int
+    | float
+    | Dict[str, jax.Array | int | float | LogMetricMode | LogFreq | LogMode],
+]
+# Combined types.
+MetricElement = ImmutableMetricElement | MutableMetricElement
+Metrics = ImmutableMetrics | MutableMetrics
+# Metrics on host (for logging).
+HostMetricElement = float | int | np.ndarray
+HostMetrics = Dict[str, HostMetricElement]
+
 
 def update_metrics(
-    global_metrics: FrozenDict | Dict[str, Any] | None,
-    step_metrics: Dict[str, Any],
+    global_metrics: Metrics | None,
+    step_metrics: StepMetrics,
     train: bool,
     batch_size: int | jax.Array,
-) -> Dict[str, Any]:
+) -> ImmutableMetrics:
+    """Update metrics with new values.
+
+    Args:
+        global_metrics: Global metrics to update. If None, a new dictionary is created.
+        step_metrics: Metrics to update with.
+        train: Whether the metrics are logged during training or evaluation.
+        batch_size: Batch size of the current step.
+
+    Returns:
+        Updated global metrics.
+    """
     if global_metrics is None:
         global_metrics = {}
     if isinstance(global_metrics, FrozenDict):
@@ -57,7 +92,7 @@ def update_metrics(
 
 
 def _update_single_metric(
-    global_metrics: Dict[str, Any],
+    global_metrics: MutableMetrics,
     key: str,
     value: Any,
     mode: LogMetricMode,
@@ -65,7 +100,22 @@ def _update_single_metric(
     log_mode: LogMode,
     count: Any,
     batch_size: int | jax.Array,
-) -> Dict[str, Any]:
+) -> MutableMetrics:
+    """Update a single metric.
+
+    Args:
+        global_metrics: Global metrics to update.
+        key: Key of the metric to update.
+        value: Value of the metric to update.
+        mode: Logging mode of the metric.
+        log_freq: Logging frequency of the metric.
+        log_mode: Logging mode of the metric.
+        count: Count of the metric to update.
+        batch_size: Batch size of the current step.
+
+    Returns:
+        Updated global metrics.
+    """
     if key not in global_metrics:
         metrics_dict = {"value": 0.0, "count": 0}
     else:
@@ -107,10 +157,25 @@ def _update_single_metric(
 
 
 def get_metrics(
-    global_metrics: FrozenDict | Dict[str, Any],
+    global_metrics: Metrics,
     log_freq: LogFreq = LogFreq.ANY,
     reset_metrics: bool = True,
-) -> Tuple[FrozenDict, Dict[str, Any]]:
+) -> Tuple[ImmutableMetrics, HostMetrics]:
+    """Calculates metrics to log from global metrics.
+
+    Supports resetting the global metrics after logging. For example, if the global metrics
+    are logged every epoch, the global metrics can be reset after obtaining the metrics to log
+    such that the next epoch starts with empty metrics.
+
+    Args:
+        global_metrics: Global metrics to log.
+        log_freq: Logging frequency of the metrics to log.
+        reset_metrics: Whether to reset the metrics after logging.
+
+    Returns:
+        The updated global metrics if reset_metrics is True, otherwise the original global metrics.
+        Additionally, the metrics to log on the host device are returned.
+    """
     if isinstance(global_metrics, FrozenDict) and reset_metrics:
         global_metrics = unfreeze(global_metrics)
     host_metrics = jax.device_get(global_metrics)
@@ -124,7 +189,7 @@ def get_metrics(
             elif host_metrics[key]["mode"] == LogMetricMode.STD:
                 value = value / count
                 value2 = host_metrics[key]["value2"] / count
-                value = jnp.sqrt(value2 - value**2)
+                value = np.sqrt(value2 - value**2)
             metrics[key] = value
             if reset_metrics:
                 global_metrics[key]["value"] = jnp.zeros_like(global_metrics[key]["value"])

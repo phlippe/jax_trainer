@@ -42,6 +42,8 @@ from jax_trainer import callbacks
 from jax_trainer.callbacks import ModelCheckpoint
 from jax_trainer.datasets import Batch, DatasetModule
 from jax_trainer.logger import (
+    HostMetrics,
+    ImmutableMetrics,
     LogFreq,
     Logger,
     LogMetricMode,
@@ -388,7 +390,9 @@ class TrainerModule:
 
     def create_training_function(
         self,
-    ) -> Callable[[TrainState, Batch, FrozenDict | None], Tuple[TrainState, FrozenDict]]:
+    ) -> Callable[
+        [TrainState, Batch, ImmutableMetrics | None], Tuple[TrainState, ImmutableMetrics]
+    ]:
         """Creates and returns a function for the training step.
 
         The function takes as input the training state and a batch from the train loader. The
@@ -396,8 +400,8 @@ class TrainerModule:
         """
 
         def train_step(
-            state: TrainState, batch: Batch, metrics: FrozenDict | None
-        ) -> Tuple[TrainState, FrozenDict]:
+            state: TrainState, batch: Batch, metrics: ImmutableMetrics | None
+        ) -> Tuple[TrainState, ImmutableMetrics]:
             next_rng, step_rng = random.split(state.rng)
             loss_fn = lambda params: self.loss_function(params, state, batch, step_rng, train=True)
             ret, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
@@ -430,14 +434,16 @@ class TrainerModule:
 
     def create_evaluation_function(
         self,
-    ) -> Callable[[TrainState, Batch, FrozenDict | None], Tuple[TrainState, FrozenDict]]:
+    ) -> Callable[[TrainState, Batch, ImmutableMetrics | None], ImmutableMetrics]:
         """Creates and returns a function for the evaluation step.
 
         The function takes as input the training state and a batch from the val/test loader. The
         function is expected to return a dictionary of logging metrics, and a new train state.
         """
 
-        def eval_step(state: TrainState, batch: Batch, metrics: FrozenDict | None) -> FrozenDict:
+        def eval_step(
+            state: TrainState, batch: Batch, metrics: ImmutableMetrics | None
+        ) -> ImmutableMetrics:
             loss, (_, step_metrics) = self.loss_function(
                 state.params,
                 state,
@@ -454,8 +460,10 @@ class TrainerModule:
     def create_functions(
         self,
     ) -> Tuple[
-        Callable[[TrainState, Batch], Tuple[TrainState, Dict]],
-        Callable[[TrainState, Batch], Tuple[TrainState, Dict]],
+        Callable[
+            [TrainState, Batch, ImmutableMetrics | None], Tuple[TrainState, ImmutableMetrics]
+        ],
+        Callable[[TrainState, Batch, ImmutableMetrics | None], ImmutableMetrics],
     ]:
         """Creates and returns functions for the training and evaluation step.
 
@@ -561,8 +569,8 @@ class TrainerModule:
         logging.info(f"Successfully completed in {time.time() - start_time:.2f} seconds.")
 
     def train_epoch(
-        self, train_loader: Iterator, epoch_idx: int, train_metrics: FrozenDict | None
-    ) -> Tuple[FrozenDict, Dict[str, Any]]:
+        self, train_loader: Iterator, epoch_idx: int, train_metrics: ImmutableMetrics | None
+    ) -> Tuple[ImmutableMetrics, HostMetrics]:
         """Trains a model for one epoch.
 
         Args:
@@ -597,7 +605,7 @@ class TrainerModule:
         train_metrics, epoch_metrics = self.logger.end_epoch(train_metrics)
         return train_metrics, epoch_metrics
 
-    def eval_model(self, data_loader: Iterator, mode: str, epoch_idx: int) -> Dict[str, Any]:
+    def eval_model(self, data_loader: Iterator, mode: str, epoch_idx: int) -> HostMetrics:
         """Evaluates the model on a dataset.
 
         Args:
