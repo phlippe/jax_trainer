@@ -319,6 +319,8 @@ class TrainerModule:
             tx=optimizer,
             rng=self.state.rng,
         )
+        # self.state = self.state.replace(step=jnp.array(self.state.step))  # Convert to jnp.array for compiling.
+        # self.state = jax.device_put(self.state)
 
     def create_jitted_functions(self):
         """Creates jitted versions of the training and evaluation functions.
@@ -389,6 +391,7 @@ class TrainerModule:
             loss_fn = lambda params: self.loss_function(params, state, batch, step_rng, train=True)
             ret, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
             loss, mutable_vars, step_metrics = ret[0], *ret[1]
+            mutable_vars = freeze(mutable_vars)  # Ensure that mutable_vars is a frozen dict
             step_metrics["loss"] = loss
             state = state.apply_gradients(
                 grads=grads, mutable_variables=mutable_vars, rng=next_rng
@@ -471,11 +474,12 @@ class TrainerModule:
         """
         # Create optimizer and the scheduler for the given number of epochs
         self.init_optimizer(num_epochs, len(train_loader))
+        self.global_step = 0
         # Prepare training loop
         self.on_training_start()
         self.test_functions(train_loader, val_loader)
         all_eval_metrics = {}
-        train_metrics = self.init_train_metrics()
+        train_metrics = None
         for epoch_idx in self.tracker(range(1, num_epochs + 1), desc="Epochs"):
             self.on_training_epoch_start(epoch_idx)
             train_metrics, epoch_metrics = self.train_epoch(
@@ -527,13 +531,13 @@ class TrainerModule:
         This is useful to check if the functions have the correct signature and return the correct
         values.
         """
-        print("Verifying training and evaluation functions...")
-        train_batch = next(iter(train_loader))
-        train_metrics = self.init_train_metrics(train_batch)
-        start_time = time.time()
-        logging.info("Testing and compiling train_step...")
-        _ = self.train_step(self.state, train_batch, train_metrics)
-        logging.info(f"Successfully completed in {time.time() - start_time:.2f} seconds.")
+        print("Verifying evaluation function...")
+        # train_batch = next(iter(train_loader))
+        # train_metrics = self.init_train_metrics(train_batch)
+        # start_time = time.time()
+        # logging.info("Testing and compiling train_step...")
+        # _ = self.train_step(self.state, train_batch, train_metrics)
+        # logging.info(f"Successfully completed in {time.time() - start_time:.2f} seconds.")
 
         val_batch = next(iter(val_loader))
         eval_metrics = self.init_eval_metrics(val_batch)
@@ -543,7 +547,7 @@ class TrainerModule:
         logging.info(f"Successfully completed in {time.time() - start_time:.2f} seconds.")
 
     def train_epoch(
-        self, train_loader: Iterator, epoch_idx: int, train_metrics: FrozenDict
+        self, train_loader: Iterator, epoch_idx: int, train_metrics: FrozenDict | None
     ) -> Tuple[FrozenDict, Dict[str, Any]]:
         """Trains a model for one epoch.
 
@@ -558,11 +562,24 @@ class TrainerModule:
         # Train model for one epoch, and log avg loss and accuracy
         self.logger.start_epoch(epoch_idx, mode="train")
         for batch in self.tracker(train_loader, desc="Training", leave=False):
-            with jax.profiler.StepTraceAnnotation(f"train_step_{self.state.step}"):
+            if train_metrics is None:
+                train_metrics = self.init_train_metrics(batch)
+            if self.global_step == 0:
+                # Log compilation and execution time of the first batch.
+                logging.info("Compiling train_step...")
+                start_time = time.time()
                 self.state, train_metrics = self.train_step(self.state, batch, train_metrics)
+                logging.info(
+                    f"Successfully completed train_step compilation in {time.time() - start_time:.2f} seconds."
+                )
+            else:
+                # Annotated with step number for TensorBoard profiling.
+                with jax.profiler.StepTraceAnnotation(f"train_step_{self.global_step}"):
+                    self.state, train_metrics = self.train_step(self.state, batch, train_metrics)
             for callback in self.train_step_callbacks:
-                callback.on_training_step(train_metrics, epoch_idx, self.state.step)
+                callback.on_training_step(train_metrics, epoch_idx, self.global_step)
             train_metrics = self.logger.log_step(train_metrics)
+            self.global_step += 1
         train_metrics, epoch_metrics = self.logger.end_epoch(train_metrics)
         return train_metrics, epoch_metrics
 
