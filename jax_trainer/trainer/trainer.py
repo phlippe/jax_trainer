@@ -406,7 +406,8 @@ class TrainerModule:
             loss_fn = lambda params: self.loss_function(params, state, batch, step_rng, train=True)
             ret, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
             loss, mutable_vars, step_metrics = ret[0], *ret[1]
-            mutable_vars = freeze(mutable_vars)  # Ensure that mutable_vars is a frozen dict
+            if mutable_vars is not None:
+                mutable_vars = freeze(mutable_vars)  # Ensure that mutable_vars is a frozen dict.
             step_metrics["loss"] = loss
             state = state.apply_gradients(
                 grads=grads, mutable_variables=mutable_vars, rng=next_rng
