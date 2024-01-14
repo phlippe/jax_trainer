@@ -2,7 +2,7 @@ import json
 import os
 import time
 from collections import defaultdict
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -10,10 +10,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from absl import logging
+from flax.core import FrozenDict
 from ml_collections import ConfigDict
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 
 from jax_trainer.logger.enums import LogFreq, LogMetricMode, LogMode
+from jax_trainer.logger.metrics import HostMetrics, Metrics, get_metrics
 from jax_trainer.logger.utils import build_tool_logger
 
 
@@ -60,7 +62,7 @@ class Logger:
         """
         return defaultdict(lambda: {"value": 0, "mode": "mean"})
 
-    def log_metrics(self, metrics: Dict[str, Any], step: int, log_postfix: str = ""):
+    def log_metrics(self, metrics: HostMetrics, step: int, log_postfix: str = ""):
         """Logs a dict of metrics to the tool of choice (e.g. Tensorboard/Wandb).
 
         Args:
@@ -120,77 +122,18 @@ class Logger:
         self.epoch_idx = epoch
         self._reset_epoch_metrics()
 
-    def log_step(self, metrics: Dict[str, Any], element_count: int = 1):
+    def log_step(self, metrics: Metrics) -> Metrics:
         """Log metrics for a single step.
 
         Args:
-            metrics (Dict[str, Any]): The metrics that should be logged in this step.
-                If a metric is a dict, it should have the following structure:
-                {
-                    'value': float | jnp.ndarray,
-                    'mode': LogMetricMode,
-                    'log_freq': LogFreq,
-                    'log_mode': LogMode
-                }
-                The value is the actual value to log for the given metric key.
-                The mode determines how the metric is aggregated over the epoch.
-                The log_freq determines whether the metric is logged in every step,
-                at the end of the epoch, or both. The log_mode determines whether the
-                metric is logged during training, validation and/or testing. 'eval'
-                represents both validation and testing.
-            element_count (int, optional): The number of elements that were processed in this step.
-                Used for averaging metrics with batches of unequal size. Defaults to 1.
+            metrics: The metrics to log. Should follow the structure of the metrics in the metrics.py file.
+
+        Returns:
+            If the metrics are logged in this step, the metrics will be updated to reset all step-specific metrics.
+            Other metrics, e.g. for epochs, will be kept. If the metrics are not logged in this step, the metrics
+            will be returned unchanged.
         """
-        self.epoch_element_count += element_count
         self.epoch_step_count += 1
-        metrics = jax.device_get(metrics)
-        for key in metrics:
-            # Prepare input metric
-            metric_in = metrics[key]
-            if not isinstance(metric_in, dict):
-                metric_in = {"value": metric_in}
-            val = metric_in["value"]
-            mode = metric_in.get("mode", LogMetricMode.MEAN)
-            log_freq = metric_in.get("log_freq", LogFreq.ANY)
-            log_mode = metric_in.get("log_mode", LogMode.ANY)
-            # Check if metric should be logged
-            if (
-                (log_mode == LogMode.TRAIN and self.logging_mode != "train")
-                or (log_mode == LogMode.VAL and self.logging_mode != "val")
-                or (log_mode == LogMode.TEST and self.logging_mode != "test")
-                or (log_mode == LogMode.EVAL and self.logging_mode == "train")
-            ):
-                continue
-            # Log metric in epoch and/or step, if applicable
-            for metrics_dict, dict_key in [
-                (self.step_metrics, "step"),
-                (self.epoch_metrics, "epoch"),
-            ]:
-                if dict_key == "step" and self.logging_mode != "train":
-                    continue
-                if (log_freq == LogFreq.EPOCH and dict_key != "epoch") or (
-                    log_freq == LogFreq.STEP and dict_key != "step"
-                ):
-                    continue
-                metrics_dict[key]["mode"] = mode
-                if mode == LogMetricMode.MEAN:
-                    metrics_dict[key]["value"] += val * (
-                        element_count if dict_key == "epoch" else 1
-                    )
-                elif mode == LogMetricMode.SUM:
-                    metrics_dict[key]["value"] += val
-                elif mode == LogMetricMode.SINGLE:
-                    metrics_dict[key]["value"] = val
-                elif mode == LogMetricMode.MAX:
-                    metrics_dict[key]["value"] = max(metrics_dict[key]["value"], val)
-                elif mode == LogMetricMode.MIN:
-                    metrics_dict[key]["value"] = min(metrics_dict[key]["value"], val)
-                elif mode in [LogMetricMode.STD, LogMetricMode.CONCAT]:
-                    if not isinstance(metrics_dict[key]["value"], list):
-                        metrics_dict[key]["value"] = []
-                    metrics_dict[key]["value"].append(val)
-                else:
-                    raise ValueError(f"Unknown logging mode {mode}.")
         # Log step metrics if applicable
         if self.logging_mode == "train" and self.log_steps_every > 0:
             self.step_count += 1
@@ -200,23 +143,23 @@ class Logger:
                     logging.warning(
                         f"Logging step count is {self.step_count} but should be {self.log_steps_every}."
                     )
-                final_step_metrics = self._finalize_metrics(
-                    metrics=self.step_metrics, element_count=self.step_count
+                metrics, step_metrics = get_metrics(
+                    metrics, log_freq=LogFreq.STEP, reset_metrics=True
                 )
+                final_step_metrics = self._finalize_metrics(metrics=step_metrics)
                 self.log_metrics(
                     final_step_metrics, step=self.full_step_counter, log_postfix="step"
                 )
                 self._reset_step_metrics()
+        return metrics
 
     def _reset_step_metrics(self):
-        """Resets the metric dict and step count for the current step."""
-        self.step_metrics = self._get_new_metrics_dict()
+        """Resets the step count for the current step."""
         self.step_count = 0
 
     def _reset_epoch_metrics(self):
-        """Resets the metric dict and step count for the current epoch."""
-        self.epoch_metrics = self._get_new_metrics_dict()
-        self.epoch_element_count = 0
+        """Resets the step count for the current epoch."""
+        self.epoch_metrics = {}
         self.epoch_step_count = 0
         self.epoch_start_time = time.time()
 
@@ -227,33 +170,22 @@ class Logger:
             key (str): The key of the metric to log.
             value (Union[float, int, jnp.ndarray]): The value of the metric to log.
         """
-        self.epoch_metrics[key]["value"] = value
-        self.epoch_metrics[key]["mode"] = LogMetricMode.SINGLE
+        self.epoch_metrics[key] = value
 
-    def _finalize_metrics(self, metrics: Dict[str, Dict[str, Any]], element_count: int = 1):
+    def _finalize_metrics(self, metrics: HostMetrics) -> HostMetrics:
         """Finalizes the metrics of the current epoch by aggregating them over the epoch,
         corresponding to their selected mode.
 
         Args:
-            metrics (Dict[str, Dict[str, Any]]): The metrics to finalize.
-            element_count (int, optional): The number of elements that were processed in this epoch.
+            metrics (HostMetrics): The metrics to finalize.
         """
         final_metrics = {}
         for key in metrics:
-            val = metrics[key]["value"]
-            if metrics[key]["mode"] == LogMetricMode.MEAN:
-                val /= element_count
-            elif metrics[key]["mode"] == LogMetricMode.STD:
-                val = np.std(np.array(val), axis=0)
-            elif metrics[key]["mode"] == LogMetricMode.CONCAT:
-                val = np.concatenate(val, axis=0)
-
             if "/" not in key:
                 save_key = f"{self.logging_mode}/{key}"
             else:
                 save_key = key
-            final_metrics[save_key] = val
-        final_metrics = jax.device_get(final_metrics)
+            final_metrics[save_key] = metrics[key]
         for key in final_metrics:
             val = final_metrics[key]
             if isinstance(val, (jnp.ndarray, np.ndarray)) and val.size == 1:
@@ -261,16 +193,25 @@ class Logger:
             final_metrics[key] = val
         return final_metrics
 
-    def end_epoch(self, save_metrics: bool = False):
+    def end_epoch(
+        self, metrics: Metrics, save_metrics: bool = False
+    ) -> Tuple[Metrics, HostMetrics]:
         """Ends the current epoch and logs the epoch metrics.
 
         Args:
+            metrics (Metrics): The metrics that should be logged in this epoch.
             save_metrics (bool, optional): Whether to save the metrics to a file. Defaults to False.
+
+        Returns:
+            The originally passed metric dict will be updated by resetting all epoch-specific metrics.
+            Other metrics, e.g. for steps, will be kept if the epoch size is not smaller than the
+            step logging size. Otherwise, those will be reset as well. The metrics that are logged
+            in this epoch will be returned as a separate dict.
         """
         self.log_epoch_scalar("time", time.time() - self.epoch_start_time)
-        final_epoch_metrics = self._finalize_metrics(
-            metrics=self.epoch_metrics, element_count=self.epoch_element_count
-        )
+        metrics, epoch_metrics = get_metrics(metrics, log_freq=LogFreq.EPOCH, reset_metrics=True)
+        epoch_metrics.update(self.epoch_metrics)
+        final_epoch_metrics = self._finalize_metrics(metrics=epoch_metrics)
         self.log_metrics(
             final_epoch_metrics,
             step=self.epoch_idx,
@@ -289,9 +230,10 @@ class Logger:
             logging.info(
                 "Training epoch has fewer steps than the logging frequency. Resetting step metrics."
             )
+            metrics, _ = get_metrics(metrics, log_freq=LogFreq.STEP, reset_metrics=True)
             self._reset_step_metrics()
         self._reset_epoch_metrics()
-        return final_epoch_metrics
+        return metrics, final_epoch_metrics
 
     def save_metrics(self, filename: str, metrics: Dict[str, Any]):
         """Saves a dictionary of metrics to file. Can be used as a textual representation of the

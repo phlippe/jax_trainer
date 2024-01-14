@@ -29,6 +29,7 @@ import numpy as np
 import optax
 import yaml
 from absl import flags, logging
+from flax.core import FrozenDict, freeze, unfreeze
 from flax.training import train_state
 from jax import random
 
@@ -41,12 +42,15 @@ from jax_trainer import callbacks
 from jax_trainer.callbacks import ModelCheckpoint
 from jax_trainer.datasets import Batch, DatasetModule
 from jax_trainer.logger import (
+    HostMetrics,
+    ImmutableMetrics,
     LogFreq,
     Logger,
     LogMetricMode,
     LogMode,
     load_pytree,
     save_pytree,
+    update_metrics,
 )
 from jax_trainer.optimizer import OptimizerBuilder
 from jax_trainer.utils import class_to_name, flatten_dict, resolve_import
@@ -182,7 +186,7 @@ class TrainerModule:
         model_rng, init_rng = random.split(model_rng)
         # Run model initialization
         variables = self.run_model_init(exmp_input, init_rng)
-        if isinstance(variables, flax.core.FrozenDict):
+        if isinstance(variables, FrozenDict):
             mutable_variables, params = variables.pop("params")
         else:
             params = variables.pop("params")
@@ -199,6 +203,28 @@ class TrainerModule:
             tx=None,
             opt_state=None,
         )
+
+    def init_train_metrics(self, batch: Optional[Batch] = None) -> FrozenDict:
+        if not hasattr(self, "train_metric_shapes"):
+            self.train_metric_shapes = None
+        if self.train_metric_shapes is None:
+            if batch is None:
+                batch = self.exmp_input
+            _, self.train_metric_shapes = jax.eval_shape(
+                self.train_step, state=self.state, batch=batch, metrics=None
+            )
+        return jax.tree_map(lambda x: jnp.zeros_like(x), self.train_metric_shapes)
+
+    def init_eval_metrics(self, batch: Optional[Batch] = None) -> FrozenDict:
+        if not hasattr(self, "eval_metric_shapes"):
+            self.eval_metric_shapes = None
+        if self.eval_metric_shapes is None:
+            if batch is None:
+                batch = self.exmp_input
+            self.eval_metric_shapes = jax.eval_shape(
+                self.eval_step, state=self.state, batch=batch, metrics=None
+            )
+        return jax.tree_map(lambda x: jnp.zeros_like(x), self.eval_metric_shapes)
 
     def set_dataset(self, dataset: DatasetModule):
         for callback in self.callbacks:
@@ -229,8 +255,8 @@ class TrainerModule:
         rngs = self.get_model_rng(init_rng)
         exmp_input = self.batch_to_input(exmp_input)
         variables = self.model.init(rngs, exmp_input, train=True)
-        if not isinstance(variables, flax.core.frozen_dict.FrozenDict):
-            variables = flax.core.frozen_dict.freeze(variables)
+        if not isinstance(variables, FrozenDict):
+            variables = freeze(variables)
         return variables
 
     def tabulate(self, exmp_input: Batch) -> str:
@@ -295,6 +321,8 @@ class TrainerModule:
             tx=optimizer,
             rng=self.state.rng,
         )
+        # self.state = self.state.replace(step=jnp.array(self.state.step))  # Convert to jnp.array for compiling.
+        # self.state = jax.device_put(self.state)
 
     def create_jitted_functions(self):
         """Creates jitted versions of the training and evaluation functions.
@@ -307,8 +335,17 @@ class TrainerModule:
             self.train_step = train_step
             self.eval_step = eval_step
         else:  # Jit
-            self.train_step = jax.jit(train_step)
-            self.eval_step = jax.jit(eval_step)
+            train_donate_argnames = ["metrics"]  # Donate metrics to avoid copying.
+            if self.trainer_config.get("donate_train_state", True):
+                train_donate_argnames.append("state")
+            self.train_step = jax.jit(
+                train_step,
+                donate_argnames=train_donate_argnames,
+            )
+            self.eval_step = jax.jit(
+                eval_step,
+                donate_argnames=["metrics"],  # Donate metrics to avoid copying.
+            )
 
     def loss_function(
         self, params: Any, state: TrainState, batch: Batch, rng: random.PRNGKey, train: bool = True
@@ -351,58 +388,71 @@ class TrainerModule:
             mutable_vars = None
         return out, mutable_vars
 
-    def create_training_function(self) -> Callable[[TrainState, Batch], Tuple[TrainState, Dict]]:
+    def create_training_function(
+        self,
+    ) -> Callable[
+        [TrainState, Batch, ImmutableMetrics | None], Tuple[TrainState, ImmutableMetrics]
+    ]:
         """Creates and returns a function for the training step.
 
         The function takes as input the training state and a batch from the train loader. The
         function is expected to return a dictionary of logging metrics, and a new train state.
         """
 
-        def train_step(state: TrainState, batch: Batch):
+        def train_step(
+            state: TrainState, batch: Batch, metrics: ImmutableMetrics | None
+        ) -> Tuple[TrainState, ImmutableMetrics]:
             next_rng, step_rng = random.split(state.rng)
             loss_fn = lambda params: self.loss_function(params, state, batch, step_rng, train=True)
             ret, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
-            loss, mutable_vars, metrics = ret[0], *ret[1]
-            metrics["loss"] = loss
+            loss, mutable_vars, step_metrics = ret[0], *ret[1]
+            mutable_vars = freeze(mutable_vars)  # Ensure that mutable_vars is a frozen dict
+            step_metrics["loss"] = loss
             state = state.apply_gradients(
                 grads=grads, mutable_variables=mutable_vars, rng=next_rng
             )
             if self.trainer_config.get("log_grad_norm", False):
                 grad_norm = optax.global_norm(grads)
-                metrics["optimizer/grad_global_norm"] = {
+                step_metrics["optimizer/grad_global_norm"] = {
                     "value": grad_norm,
                     "log_freq": LogFreq.STEP,
                 }
-                metrics["optimizer/grad_global_norm_max"] = {
+                step_metrics["optimizer/grad_global_norm_max"] = {
                     "value": grad_norm,
                     "mode": LogMetricMode.MAX,
                     "log_freq": LogFreq.EPOCH,
                 }
                 params_norm = optax.global_norm(state.params)
-                metrics["optimizer/params_global_norm"] = {
+                step_metrics["optimizer/params_global_norm"] = {
                     "value": params_norm,
                     "log_freq": LogFreq.STEP,
                 }
+            metrics = update_metrics(metrics, step_metrics, train=True, batch_size=batch.size)
             return state, metrics
 
         return train_step
 
-    def create_evaluation_function(self) -> Callable[[TrainState, Batch], Tuple[TrainState, Dict]]:
+    def create_evaluation_function(
+        self,
+    ) -> Callable[[TrainState, Batch, ImmutableMetrics | None], ImmutableMetrics]:
         """Creates and returns a function for the evaluation step.
 
         The function takes as input the training state and a batch from the val/test loader. The
         function is expected to return a dictionary of logging metrics, and a new train state.
         """
 
-        def eval_step(state: TrainState, batch: Batch):
-            loss, (_, metrics) = self.loss_function(
+        def eval_step(
+            state: TrainState, batch: Batch, metrics: ImmutableMetrics | None
+        ) -> ImmutableMetrics:
+            loss, (_, step_metrics) = self.loss_function(
                 state.params,
                 state,
                 batch,
                 random.PRNGKey(self.trainer_config.get("seed_eval", 0)),
                 train=False,
             )
-            metrics["loss"] = loss
+            step_metrics["loss"] = loss
+            metrics = update_metrics(metrics, step_metrics, train=False, batch_size=batch.size)
             return metrics
 
         return eval_step
@@ -410,8 +460,10 @@ class TrainerModule:
     def create_functions(
         self,
     ) -> Tuple[
-        Callable[[TrainState, Batch], Tuple[TrainState, Dict]],
-        Callable[[TrainState, Batch], Tuple[TrainState, Dict]],
+        Callable[
+            [TrainState, Batch, ImmutableMetrics | None], Tuple[TrainState, ImmutableMetrics]
+        ],
+        Callable[[TrainState, Batch, ImmutableMetrics | None], ImmutableMetrics],
     ]:
         """Creates and returns functions for the training and evaluation step.
 
@@ -443,14 +495,18 @@ class TrainerModule:
         """
         # Create optimizer and the scheduler for the given number of epochs
         self.init_optimizer(num_epochs, len(train_loader))
+        self.global_step = 0
         # Prepare training loop
         self.on_training_start()
-        self.test_functions(train_loader, val_loader)
+        self.test_eval_function(val_loader)
         all_eval_metrics = {}
+        train_metrics = None
         for epoch_idx in self.tracker(range(1, num_epochs + 1), desc="Epochs"):
             self.on_training_epoch_start(epoch_idx)
-            train_metrics = self.train_epoch(train_loader, epoch_idx=epoch_idx)
-            self.on_training_epoch_end(train_metrics, epoch_idx)
+            train_metrics, epoch_metrics = self.train_epoch(
+                train_loader, epoch_idx=epoch_idx, train_metrics=train_metrics
+            )
+            self.on_training_epoch_end(epoch_metrics, epoch_idx)
             # Validation every N epochs
             if (
                 self.trainer_config.check_val_every_n_epoch > 0
@@ -489,27 +545,32 @@ class TrainerModule:
             self.on_test_epoch_end(test_metrics, epoch_idx=epoch_idx)
         return test_metrics
 
-    def test_functions(self, train_loader: Iterator, val_loader: Iterator):
-        """Tests the training and evaluation functions on a few batches from the train, val and
-        test loader.
+    def test_eval_function(self, val_loader: Iterator) -> None:
+        """Tests the evaluation function on a single batch.
 
         This is useful to check if the functions have the correct signature and return the correct
-        values.
-        """
-        print("Verifying training and evaluation functions...")
-        train_batch = next(iter(train_loader))
-        start_time = time.time()
-        logging.info("Testing and compiling train_step...")
-        _ = self.train_step(self.state, train_batch)
-        logging.info(f"Successfully completed in {time.time() - start_time:.2f} seconds.")
+        values. This prevents annoying errors that occur at the first evaluation step.
 
+        This function does not test the training function anymore. This is because the training
+        function is already executed in the first epoch and we change its jit signature to donate
+        the train state and metrics. Thus, executing a training step requires updating the train
+        state, which we would not want to do here. The compilation time is logged during the very
+        first training step.
+
+        Args:
+            val_loader: Data loader of the validation set.
+        """
+        print("Verifying evaluation function...")
         val_batch = next(iter(val_loader))
+        eval_metrics = self.init_eval_metrics(val_batch)
         start_time = time.time()
         logging.info("Testing and compiling eval_step...")
-        _ = self.eval_step(self.state, val_batch)
+        _ = self.eval_step(self.state, val_batch, eval_metrics)
         logging.info(f"Successfully completed in {time.time() - start_time:.2f} seconds.")
 
-    def train_epoch(self, train_loader: Iterator, epoch_idx: int) -> Dict[str, Any]:
+    def train_epoch(
+        self, train_loader: Iterator, epoch_idx: int, train_metrics: ImmutableMetrics | None
+    ) -> Tuple[ImmutableMetrics, HostMetrics]:
         """Trains a model for one epoch.
 
         Args:
@@ -523,15 +584,28 @@ class TrainerModule:
         # Train model for one epoch, and log avg loss and accuracy
         self.logger.start_epoch(epoch_idx, mode="train")
         for batch in self.tracker(train_loader, desc="Training", leave=False):
-            with jax.profiler.StepTraceAnnotation(f"train_step_{self.state.step}"):
-                self.state, step_metrics = self.train_step(self.state, batch)
-            self.logger.log_step(step_metrics, element_count=batch.size)
+            if train_metrics is None:
+                train_metrics = self.init_train_metrics(batch)
+            if self.global_step == 0:
+                # Log compilation and execution time of the first batch.
+                logging.info("Compiling train_step...")
+                start_time = time.time()
+                self.state, train_metrics = self.train_step(self.state, batch, train_metrics)
+                logging.info(
+                    f"Successfully completed train_step compilation in {time.time() - start_time:.2f} seconds."
+                )
+            else:
+                # Annotated with step number for TensorBoard profiling.
+                with jax.profiler.StepTraceAnnotation(f"train_step_{self.global_step}"):
+                    self.state, train_metrics = self.train_step(self.state, batch, train_metrics)
             for callback in self.train_step_callbacks:
-                callback.on_training_step(step_metrics, epoch_idx, self.state.step)
-        metrics = self.logger.end_epoch()
-        return metrics
+                callback.on_training_step(train_metrics, epoch_idx, self.global_step)
+            train_metrics = self.logger.log_step(train_metrics)
+            self.global_step += 1
+        train_metrics, epoch_metrics = self.logger.end_epoch(train_metrics)
+        return train_metrics, epoch_metrics
 
-    def eval_model(self, data_loader: Iterator, mode: str, epoch_idx: int) -> Dict[str, Any]:
+    def eval_model(self, data_loader: Iterator, mode: str, epoch_idx: int) -> HostMetrics:
         """Evaluates the model on a dataset.
 
         Args:
@@ -545,13 +619,14 @@ class TrainerModule:
         """
         # Test model on all images of a data loader and return avg loss
         self.logger.start_epoch(epoch_idx, mode=mode)
-        step_metrics = None
+        eval_metrics = self.init_eval_metrics()
+        step_count = 0
         for batch in self.tracker(data_loader, desc=mode.capitalize(), leave=False):
-            step_metrics = self.eval_step(self.state, batch)
-            self.logger.log_step(step_metrics, element_count=batch.size)
-        if step_metrics is None:
+            eval_metrics = self.eval_step(self.state, batch, eval_metrics)
+            step_count += 1
+        if step_count == 0:
             logging.warning(f"No batches in {mode} loader at epoch {epoch_idx}.")
-        metrics = self.logger.end_epoch(save_metrics=True)
+        _, metrics = self.logger.end_epoch(eval_metrics, save_metrics=True)
         return metrics
 
     def tracker(self, iterator: Iterator, **kwargs) -> Iterator:
