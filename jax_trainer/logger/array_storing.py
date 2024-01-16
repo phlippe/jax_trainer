@@ -38,7 +38,12 @@ def spec_to_array(spec: ArraySpec) -> jnp.ndarray:
     else:
         array = jnp.full(spec.shape, spec.value, dtype=spec.dtype)
         if isinstance(device, str):
-            device = jax.devices(device)[0]
+            if ":" in device:
+                backend_name, device_id = device.split(":")
+                device_id = int(device_id)
+            else:
+                backend_name, device_id = device, 0
+            device = jax.devices(backend_name)[device_id]
         array = jax.device_put(x=array, device=device)
         return array
 
