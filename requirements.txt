@@ -17,7 +17,7 @@ dm-tree==0.1.8
 etils==1.3.0
 filelock==3.12.2
 flax==0.7.0
-fonttools==4.40.0
+fonttools>=4.43.0
 frozenlist==1.3.3
 fsspec==2023.6.0
 google-auth==2.21.0
@@ -28,7 +28,7 @@ idna==3.4
 importlib-resources==6.0.0
 jax==0.4.13
 jaxlib==0.4.13+cuda12.cudnn89
-Jinja2==3.1.2
+Jinja2>=3.1.3
 kiwisolver==1.4.4
 lightning-utilities==0.9.0
 Markdown==3.4.3
@@ -60,7 +60,7 @@ optax==0.1.5
 orbax-checkpoint==0.2.7
 packaging==23.1
 pandas==2.0.3
-Pillow==10.0.0
+Pillow>=10.0.1
 platformdirs==3.8.1
 pre-commit==3.3.3
 protobuf==4.23.4
@@ -92,8 +92,8 @@ torchvision==0.15.2+cpu
 tqdm==4.65.0
 typing_extensions==4.4.0
 tzdata==2023.3
-urllib3==1.26.13
+urllib3>=1.26.18
 virtualenv==20.23.1
-Werkzeug==2.3.6
+Werkzeug>=2.3.8
 yarl==1.9.2
 zipp==3.16.0
