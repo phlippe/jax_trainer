@@ -75,7 +75,7 @@ def update_metrics(
             if log_freq in [LogFreq.ANY, LogFreq.EPOCH]:
                 postfix.append((LogFreq.EPOCH, "epoch"))
         else:
-            postfix.append((LogFreq.EPOCH, ""))
+            postfix.append((LogFreq.EPOCH, "epoch"))
         for sub_freq, p in postfix:
             global_metrics = _update_single_metric(
                 global_metrics,
@@ -182,6 +182,7 @@ def get_metrics(
     metrics = {}
     for key in host_metrics:
         if log_freq == LogFreq.ANY or log_freq == host_metrics[key]["log_freq"]:
+            host_key = key.rsplit("_", 1)[0]  # Remove postfix of train/test.
             value = host_metrics[key]["value"]
             count = host_metrics[key]["count"]
             if host_metrics[key]["mode"] == LogMetricMode.MEAN:
@@ -190,7 +191,7 @@ def get_metrics(
                 value = value / count
                 value2 = host_metrics[key]["value2"] / count
                 value = np.sqrt(value2 - value**2)
-            metrics[key] = value
+            metrics[host_key] = value
             if reset_metrics:
                 global_metrics[key]["value"] = jnp.zeros_like(global_metrics[key]["value"])
                 global_metrics[key]["count"] = jnp.zeros_like(global_metrics[key]["count"])

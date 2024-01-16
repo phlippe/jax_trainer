@@ -509,9 +509,7 @@ class TrainerModule:
                 train_loader, epoch_idx=epoch_idx, train_metrics=train_metrics
             )
             if self.trainer_config.get("detect_nans", False):
-                nan_keys = self.trainer_config.get(
-                    "nan_keys", ("train/loss", "train/loss_step", "train/loss_epoch")
-                )
+                nan_keys = self.trainer_config.get("nan_keys", ("train/loss",))
                 if isinstance(nan_keys, str):
                     nan_keys = (nan_keys,)
                 if any([np.isnan(epoch_metrics.get(key, 0.0)) for key in nan_keys]):
