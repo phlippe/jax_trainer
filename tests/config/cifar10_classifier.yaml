@@ -10,6 +10,7 @@ trainer:
   seed: 42
   seed_eval: 0
   log_grad_norm: True
+  detect_nans: True
   logger:
     log_dir: tests/checkpoints/BuildTrainerTest/
     tool: TensorBoard

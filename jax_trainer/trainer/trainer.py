@@ -502,11 +502,20 @@ class TrainerModule:
         self.test_eval_function(val_loader)
         all_eval_metrics = {}
         train_metrics = None
+        training_failed = False
         for epoch_idx in self.tracker(range(1, num_epochs + 1), desc="Epochs"):
             self.on_training_epoch_start(epoch_idx)
             train_metrics, epoch_metrics = self.train_epoch(
                 train_loader, epoch_idx=epoch_idx, train_metrics=train_metrics
             )
+            if self.trainer_config.get("detect_nans", False):
+                nan_keys = self.trainer_config.get("nan_keys", ("loss", "loss_step", "loss_epoch"))
+                if isinstance(nan_keys, str):
+                    nan_keys = (nan_keys,)
+                if any([np.isnan(epoch_metrics.get(key, 0.0)) for key in nan_keys]):
+                    logging.error("NaN detected in epoch metrics. Aborting training.")
+                    training_failed = True
+                    break
             self.on_training_epoch_end(epoch_metrics, epoch_idx)
             # Validation every N epochs
             if (
@@ -517,18 +526,19 @@ class TrainerModule:
                 eval_metrics = self.eval_model(val_loader, mode="val", epoch_idx=epoch_idx)
                 all_eval_metrics[epoch_idx] = eval_metrics
                 self.on_validation_epoch_end(eval_metrics, epoch_idx)
-        self.on_training_end()
-        # Test best model if possible
-        if test_loader is not None:
-            self.load_model(raise_if_not_found=False)
-            self.on_test_epoch_start(epoch_idx)
-            test_metrics = self.eval_model(test_loader, mode="test", epoch_idx=epoch_idx)
-            self.on_test_epoch_end(test_metrics, epoch_idx)
-            all_eval_metrics["test"] = test_metrics
+        if not training_failed:
+            self.on_training_end()
+            # Test best model if possible
+            if test_loader is not None:
+                self.load_model(raise_if_not_found=False)
+                self.on_test_epoch_start(epoch_idx)
+                test_metrics = self.eval_model(test_loader, mode="test", epoch_idx=epoch_idx)
+                self.on_test_epoch_end(test_metrics, epoch_idx)
+                all_eval_metrics["test"] = test_metrics
         # Close logger
-        self.logger.finalize("success")
+        self.logger.finalize("success" if not training_failed else "failed")
         for callback in self.callbacks:
-            callback.finalize("success")
+            callback.finalize("success" if not training_failed else "failed")
         return all_eval_metrics
 
     def test_model(
