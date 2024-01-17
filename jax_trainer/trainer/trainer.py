@@ -134,6 +134,7 @@ class TrainerModule:
         self.logger = LoggerClass(logger_config, full_config)
         # Save config and exmp_input
         log_dir = self.logger.log_dir
+        logging.info(f"Logging at {log_dir}")
         self.log_dir = log_dir
         self.trainer_config.logger.log_dir = log_dir
         os.makedirs(os.path.join(log_dir, "metrics/"), exist_ok=True)
@@ -284,8 +285,8 @@ class TrainerModule:
         param_dtype = jax.tree_map(lambda x: x.dtype, params)
         param_mean = jax.tree_map(lambda x: jnp.mean(x).item(), params)
         param_std = jax.tree_map(lambda x: jnp.std(x).item(), params)
-        param_min = jax.tree_map(lambda x: jnp.min(x).item(), params)
-        param_max = jax.tree_map(lambda x: jnp.max(x).item(), params)
+        param_min = jax.tree_map(lambda x: jnp.min(x).item() if x.size > 0 else 0, params)
+        param_max = jax.tree_map(lambda x: jnp.max(x).item() if x.size > 0 else 0, params)
         summary = defaultdict(list)
         for key in sorted(list(params.keys())):
             summary["Name"].append(key)
@@ -513,7 +514,9 @@ class TrainerModule:
                 if isinstance(nan_keys, str):
                     nan_keys = (nan_keys,)
                 if any([np.isnan(epoch_metrics.get(key, 0.0)) for key in nan_keys]):
-                    logging.error("NaN detected in epoch metrics. Aborting training.")
+                    logging.error(
+                        f"NaN detected in epoch metrics of epoch {epoch_idx}. Aborting training."
+                    )
                     training_failed = True
                     break
             self.on_training_epoch_end(epoch_metrics, epoch_idx)
