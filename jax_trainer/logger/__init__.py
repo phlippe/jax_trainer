@@ -6,6 +6,7 @@ from jax_trainer.logger.metrics import (
     ImmutableMetrics,
     Metrics,
     MutableMetrics,
+    StepMetrics,
     get_metrics,
     update_metrics,
 )

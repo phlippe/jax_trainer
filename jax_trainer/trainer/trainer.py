@@ -32,6 +32,10 @@ from absl import flags, logging
 from flax.core import FrozenDict, freeze, unfreeze
 from flax.training import train_state
 from jax import random
+from jax.experimental import mesh_utils
+from jax.experimental.shard_map import shard_map
+from jax.sharding import Mesh
+from jax.sharding import PartitionSpec as P
 
 # ML collections for config
 from ml_collections import ConfigDict, FrozenConfigDict
@@ -48,11 +52,19 @@ from jax_trainer.logger import (
     Logger,
     LogMetricMode,
     LogMode,
+    StepMetrics,
     load_pytree,
     save_pytree,
     update_metrics,
 )
 from jax_trainer.optimizer import OptimizerBuilder
+from jax_trainer.sharding import (
+    fold_rng_over_axis,
+    gather_batch,
+    sync_gradients,
+    sync_step_metrics,
+)
+from jax_trainer.trainer import model_handler
 from jax_trainer.utils import class_to_name, flatten_dict, resolve_import
 
 
@@ -91,6 +103,10 @@ class TrainerModule:
         self.trainer_config.check_val_every_n_epoch = self.trainer_config.get(
             "check_val_every_n_epoch", 1
         )
+        # Create model handler
+        self.model_handler = create_model_handler(self)
+        # Any operations before the initialization
+        self.pre_init()
         # Create empty model. Note: no parameters yet
         self.build_model(model_config)
         # Init trainer parts
@@ -102,6 +118,14 @@ class TrainerModule:
         self.trainer_config = FrozenConfigDict(self.trainer_config)
         self.model_config = FrozenConfigDict(self.model_config)
         self.optimizer_config = FrozenConfigDict(self.optimizer_config)
+
+    def pre_init(self):
+        """Any operations before the initialization.
+
+        This is useful for example to set any variables needed before the model initialization,
+        like the mesh in the Parallel Trainer.
+        """
+        pass
 
     def batch_to_input(self, batch: Batch) -> Any:
         raise NotImplementedError
@@ -116,6 +140,7 @@ class TrainerModule:
         model_class = resolve_import(model_config.name)
         hparams = FrozenConfigDict(model_config.get("hparams", {}))
         self.model = model_class(**hparams)
+        self.model_handler.post_build_model()
 
     def init_logger(self, logger_config: ConfigDict):
         """Initializes a logger and creates a logging directory.
@@ -253,12 +278,7 @@ class TrainerModule:
         Returns:
             The initialized variable dictionary.
         """
-        rngs = self.get_model_rng(init_rng)
-        exmp_input = self.batch_to_input(exmp_input)
-        variables = self.model.init(rngs, exmp_input, train=True)
-        if not isinstance(variables, FrozenDict):
-            variables = freeze(variables)
-        return variables
+        return self.model_handler.run_model_init(exmp_input, init_rng)
 
     def tabulate(self, exmp_input: Batch) -> str:
         """Prints a summary of the Module represented as table.
@@ -266,11 +286,7 @@ class TrainerModule:
         Args:
             exmp_input: An input to the model with which the shapes are inferred.
         """
-        rngs = self.get_model_rng(random.PRNGKey(0))
-        exmp_input = self.batch_to_input(exmp_input)
-        return self.model.tabulate(
-            rngs, exmp_input, train=True, console_kwargs={"force_terminal": False, "width": 300}
-        )
+        return self.model_handler.tabulate(exmp_input)
 
     def tabulate_params(self) -> str:
         """Prints a summary of the parameters represented as table.
@@ -278,26 +294,7 @@ class TrainerModule:
         Args:
             exmp_input: An input to the model with which the shapes are inferred.
         """
-        params = self.state.params
-        params = flatten_dict(params)
-        param_shape = jax.tree_map(lambda x: x.shape, params)
-        param_count = jax.tree_map(lambda x: np.prod(x.shape), params)
-        param_dtype = jax.tree_map(lambda x: x.dtype, params)
-        param_mean = jax.tree_map(lambda x: jnp.mean(x).item(), params)
-        param_std = jax.tree_map(lambda x: jnp.std(x).item(), params)
-        param_min = jax.tree_map(lambda x: jnp.min(x).item() if x.size > 0 else 0, params)
-        param_max = jax.tree_map(lambda x: jnp.max(x).item() if x.size > 0 else 0, params)
-        summary = defaultdict(list)
-        for key in sorted(list(params.keys())):
-            summary["Name"].append(key)
-            summary["Shape"].append(param_shape[key])
-            summary["Count"].append(param_count[key])
-            summary["Dtype"].append(param_dtype[key])
-            summary["Mean"].append(param_mean[key])
-            summary["Std"].append(param_std[key])
-            summary["Min"].append(param_min[key])
-            summary["Max"].append(param_max[key])
-        return python_tabulate(summary, headers="keys")
+        return self.model_handler.tabulate_params()
 
     def init_optimizer(self, num_epochs: int, num_train_steps_per_epoch: int):
         """Initializes the optimizer and learning rate scheduler.
@@ -315,15 +312,7 @@ class TrainerModule:
         )
         self.lr_schedule = lr_schedule  # Save for logging
         # Initialize training state
-        self.state = TrainState.create(
-            apply_fn=self.state.apply_fn,
-            params=self.state.params,
-            mutable_variables=self.state.mutable_variables,
-            tx=optimizer,
-            rng=self.state.rng,
-        )
-        # self.state = self.state.replace(step=jnp.array(self.state.step))  # Convert to jnp.array for compiling.
-        # self.state = jax.device_put(self.state)
+        self.state = self.model_handler.init_state_with_optimizer(optimizer)
 
     def create_jitted_functions(self):
         """Creates jitted versions of the training and evaluation functions.
@@ -399,40 +388,7 @@ class TrainerModule:
         The function takes as input the training state and a batch from the train loader. The
         function is expected to return a dictionary of logging metrics, and a new train state.
         """
-
-        def train_step(
-            state: TrainState, batch: Batch, metrics: ImmutableMetrics | None
-        ) -> Tuple[TrainState, ImmutableMetrics]:
-            next_rng, step_rng = random.split(state.rng)
-            loss_fn = lambda params: self.loss_function(params, state, batch, step_rng, train=True)
-            ret, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
-            loss, mutable_vars, step_metrics = ret[0], *ret[1]
-            if mutable_vars is not None:
-                mutable_vars = freeze(mutable_vars)  # Ensure that mutable_vars is a frozen dict.
-            step_metrics["loss"] = loss
-            state = state.apply_gradients(
-                grads=grads, mutable_variables=mutable_vars, rng=next_rng
-            )
-            if self.trainer_config.get("log_grad_norm", False):
-                grad_norm = optax.global_norm(grads)
-                step_metrics["optimizer/grad_global_norm"] = {
-                    "value": grad_norm,
-                    "log_freq": LogFreq.STEP,
-                }
-                step_metrics["optimizer/grad_global_norm_max"] = {
-                    "value": grad_norm,
-                    "mode": LogMetricMode.MAX,
-                    "log_freq": LogFreq.EPOCH,
-                }
-                params_norm = optax.global_norm(state.params)
-                step_metrics["optimizer/params_global_norm"] = {
-                    "value": params_norm,
-                    "log_freq": LogFreq.STEP,
-                }
-            metrics = update_metrics(metrics, step_metrics, train=True, batch_size=batch.size)
-            return state, metrics
-
-        return train_step
+        return self.model_handler.create_training_function()
 
     def create_evaluation_function(
         self,
@@ -442,22 +398,7 @@ class TrainerModule:
         The function takes as input the training state and a batch from the val/test loader. The
         function is expected to return a dictionary of logging metrics, and a new train state.
         """
-
-        def eval_step(
-            state: TrainState, batch: Batch, metrics: ImmutableMetrics | None
-        ) -> ImmutableMetrics:
-            loss, (_, step_metrics) = self.loss_function(
-                state.params,
-                state,
-                batch,
-                random.PRNGKey(self.trainer_config.get("seed_eval", 0)),
-                train=False,
-            )
-            step_metrics["loss"] = loss
-            metrics = update_metrics(metrics, step_metrics, train=False, batch_size=batch.size)
-            return metrics
-
-        return eval_step
+        return self.model_handler.create_evaluation_function()
 
     def create_functions(
         self,
@@ -837,3 +778,390 @@ class TrainerModule:
         # Load model
         trainer.load_model()
         return trainer
+
+
+class ModelHandler:
+    def __init__(self, trainer: TrainerModule):
+        self.trainer = trainer
+
+    def post_build_model(self):
+        pass
+
+    def create_training_function(
+        self,
+    ) -> Callable[
+        [TrainState, Batch, ImmutableMetrics | None], Tuple[TrainState, ImmutableMetrics]
+    ]:
+        raise NotImplementedError
+
+    def create_evaluation_function(
+        self,
+    ) -> Callable[
+        [TrainState, Batch, ImmutableMetrics | None], Tuple[TrainState, ImmutableMetrics]
+    ]:
+        raise NotImplementedError
+
+    def run_model_init(self, exmp_input: Batch, init_rng: random.KeyArray) -> FrozenDict:
+        raise NotImplementedError
+
+    def init_state_with_optimizer(self, optimizer: Any):
+        raise NotImplementedError
+
+    def tabulate(self, exmp_input: Batch) -> str:
+        raise NotImplementedError
+
+    def tabulate_params(self) -> str:
+        raise NotImplementedError
+
+
+def create_model_handler(trainer: TrainerModule) -> ModelHandler:
+    model_handler_cls = trainer.trainer_config.get("model_handler", None)
+    if model_handler_cls is None:
+        if trainer.trainer_config.get("parallelism", None) is None:
+            model_handler_cls = SingleDeviceModelHandler
+        else:
+            model_handler_cls = MeshModelHandler
+    else:
+        model_handler_cls = resolve_import(model_handler_cls)
+    return model_handler_cls(trainer)
+
+
+def add_grad_norm_metrics(metrics: StepMetrics, grads: Any, params: Any) -> StepMetrics:
+    # Gradient norms do not need to be synced as grads are already synced.
+    grad_norm = optax.global_norm(grads)
+    metrics["optimizer/grad_global_norm"] = {
+        "value": grad_norm,
+        "log_freq": LogFreq.STEP,
+    }
+    metrics["optimizer/grad_global_norm_max"] = {
+        "value": grad_norm,
+        "mode": LogMetricMode.MAX,
+        "log_freq": LogFreq.EPOCH,
+    }
+    params_norm = optax.global_norm(params)
+    metrics["optimizer/params_global_norm"] = {
+        "value": params_norm,
+        "log_freq": LogFreq.STEP,
+    }
+    return metrics
+
+
+class SingleDeviceModelHandler(ModelHandler):
+    def create_training_function(
+        self,
+    ) -> Callable[
+        [TrainState, Batch, ImmutableMetrics | None], Tuple[TrainState, ImmutableMetrics]
+    ]:
+        def train_step(
+            state: TrainState, batch: Batch, metrics: ImmutableMetrics | None
+        ) -> Tuple[TrainState, ImmutableMetrics]:
+            next_rng, step_rng = random.split(state.rng)
+            loss_fn = lambda params: self.trainer.loss_function(
+                params, state, batch, step_rng, train=True
+            )
+            ret, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
+            loss, mutable_vars, step_metrics = ret[0], *ret[1]
+            if mutable_vars is not None:
+                mutable_vars = freeze(mutable_vars)  # Ensure that mutable_vars is a frozen dict.
+            step_metrics["loss"] = loss
+            state = state.apply_gradients(
+                grads=grads, mutable_variables=mutable_vars, rng=next_rng
+            )
+            if self.trainer.trainer_config.get("log_grad_norm", False):
+                step_metrics = add_grad_norm_metrics(step_metrics, grads, state.params)
+            metrics = update_metrics(metrics, step_metrics, train=True, batch_size=batch.size)
+            return state, metrics
+
+        return train_step
+
+    def create_evaluation_function(
+        self,
+    ) -> Callable[[TrainState, Batch, ImmutableMetrics | None], ImmutableMetrics]:
+        """Creates and returns a function for the evaluation step.
+
+        The function takes as input the training state and a batch from the val/test loader. The
+        function is expected to return a dictionary of logging metrics, and a new train state.
+        """
+
+        def eval_step(
+            state: TrainState, batch: Batch, metrics: ImmutableMetrics | None
+        ) -> ImmutableMetrics:
+            loss, (_, step_metrics) = self.trainer.loss_function(
+                state.params,
+                state,
+                batch,
+                random.PRNGKey(self.trainer.trainer_config.get("seed_eval", 0)),
+                train=False,
+            )
+            step_metrics["loss"] = loss
+            metrics = update_metrics(metrics, step_metrics, train=False, batch_size=batch.size)
+            return metrics
+
+        return eval_step
+
+    def run_model_init(self, exmp_input: Batch, init_rng: random.KeyArray) -> Dict:
+        """The model initialization call.
+
+        Args:
+            exmp_input: An input to the model with which the shapes are inferred.
+            init_rng: A jax.random.PRNGKey.
+
+        Returns:
+            The initialized variable dictionary.
+        """
+        rngs = self.trainer.get_model_rng(init_rng)
+        exmp_input = self.trainer.batch_to_input(exmp_input)
+        variables = self.trainer.model.init(rngs, exmp_input, train=True)
+        if not isinstance(variables, FrozenDict):
+            variables = freeze(variables)
+        return variables
+
+    def init_state_with_optimizer(self, optimizer: Any) -> TrainState:
+        return TrainState.create(
+            apply_fn=self.trainer.state.apply_fn,
+            params=self.trainer.state.params,
+            mutable_variables=self.trainer.state.mutable_variables,
+            tx=optimizer,
+            rng=self.trainer.state.rng,
+        )
+
+    def tabulate(self, exmp_input: Batch) -> str:
+        """Prints a summary of the Module represented as table.
+
+        Args:
+            exmp_input: An input to the model with which the shapes are inferred.
+        """
+        rngs = self.trainer.get_model_rng(random.PRNGKey(0))
+        exmp_input = self.trainer.batch_to_input(exmp_input)
+        return self.trainer.model.tabulate(
+            rngs, exmp_input, train=True, console_kwargs={"force_terminal": False, "width": 300}
+        )
+
+    def tabulate_params(self) -> str:
+        """Prints a summary of the parameters represented as table.
+
+        Args:
+            exmp_input: An input to the model with which the shapes are inferred.
+        """
+        params = self.trainer.state.params
+        params = flatten_dict(params)
+        param_shape = jax.tree_map(lambda x: x.shape, params)
+        param_count = jax.tree_map(lambda x: np.prod(x.shape), params)
+        param_dtype = jax.tree_map(lambda x: x.dtype, params)
+        param_mean = jax.tree_map(lambda x: jnp.mean(x).item(), params)
+        param_std = jax.tree_map(lambda x: jnp.std(x).item(), params)
+        param_min = jax.tree_map(lambda x: jnp.min(x).item() if x.size > 0 else 0, params)
+        param_max = jax.tree_map(lambda x: jnp.max(x).item() if x.size > 0 else 0, params)
+        summary = defaultdict(list)
+        for key in sorted(list(params.keys())):
+            summary["Name"].append(key)
+            summary["Shape"].append(param_shape[key])
+            summary["Count"].append(param_count[key])
+            summary["Dtype"].append(param_dtype[key])
+            summary["Mean"].append(param_mean[key])
+            summary["Std"].append(param_std[key])
+            summary["Min"].append(param_min[key])
+            summary["Max"].append(param_max[key])
+        return python_tabulate(summary, headers="keys")
+
+
+class MeshModelHandler(ModelHandler):
+    def __init__(self, trainer: TrainerModule):
+        super().__init__(trainer)
+        self.create_mesh()
+
+    def create_mesh(self):
+        """Mesh creation."""
+        assert hasattr(
+            "parallelism", self.trainer.trainer_config
+        ), "ParallelTrainerModule requires a parallelism configuration. Please specify it in the trainer config."
+        self.parallelism = self.trainer.trainer_config.parallelism
+        # Create mesh of devices using model and data parallelism.
+        model_axis_size = self.parallelism.model_axis_size
+        if jax.device_count() % model_axis_size != 0:
+            raise ValueError(
+                f"Device count ({jax.device_count()}) is not divisible by model size ({model_axis_size})."
+            )
+        data_axis_size = jax.device_count() // model_axis_size
+        if hasattr(self.parallelism, "data_axis_size"):
+            if self.parallelism.data_axis_size != data_axis_size:
+                raise ValueError(
+                    f"Specified a data size of {self.parallelism.data_axis_size} but the device count ({jax.device_count()}) with model size ({model_axis_size}) results in an axis size of {data_axis_size}."
+                )
+        self.parallelism.data_axis_size = data_axis_size
+        devices = np.asarray(jax.devices()).reshape((data_axis_size, model_axis_size))
+        self.parallelism.model_axis_name = self.parallelism.get("model_axis_name", "model")
+        self.parallelism.data_axis_name = self.parallelism.get("data_axis_name", "data")
+        self.mesh = Mesh(
+            devices, [self.parallelism.data_axis_name, self.parallelism.model_axis_name]
+        )
+        self.P_data_model = P(self.parallelism.data_axis_name, self.parallelism.model_axis_name)
+        self.train_state_axes = TrainState(
+            global_step=P(),
+            opt_state=self.P_data_model,
+            tx=None,
+            params=self.P_data_model,
+            mutable_variables=self.P_data_model,
+            rng=self.P_data_model,
+        )
+
+    def post_build_model(self):
+        # TODO: Support sharding full model weights.
+        pass
+
+    def create_training_function(
+        self,
+    ) -> Callable[
+        [TrainState, Batch, ImmutableMetrics | None], Tuple[TrainState, ImmutableMetrics]
+    ]:
+        """Creates and returns a function for the training step.
+
+        The function takes as input the training state and a batch from the train loader. The
+        function is expected to return a dictionary of logging metrics, and a new train state.
+        """
+
+        def train_step(
+            state: TrainState, batch: Batch, metrics: ImmutableMetrics | None
+        ) -> Tuple[TrainState, ImmutableMetrics]:
+            batch = gather_batch(batch, axis_name=self.parallelism.model_axis_name)
+            next_rng, step_rng = random.split(state.rng)
+            loss_fn = lambda params: self.trainer.loss_function(
+                params, state, batch, step_rng, train=True
+            )
+            ret, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
+            loss, mutable_vars, step_metrics = ret[0], *ret[1]
+            if mutable_vars is not None:
+                mutable_vars = freeze(mutable_vars)  # Ensure that mutable_vars is a frozen dict.
+            step_metrics["loss"] = loss
+            # Sync grads and metrics across all devices.
+            step_metrics = sync_step_metrics(
+                step_metrics, axis_name=self.parallelism.data_axis_name
+            )
+            grads = sync_gradients(grads, axis_name=self.parallelism.data_axis_name)
+            # Update state.
+            state = state.apply_gradients(
+                grads=grads, mutable_variables=mutable_vars, rng=next_rng
+            )
+            if self.trainer.trainer_config.get("log_grad_norm", False):
+                step_metrics = add_grad_norm_metrics(step_metrics, grads, state.params)
+            metrics = update_metrics(
+                metrics,
+                step_metrics,
+                train=True,
+                batch_size=batch.size * self.parallelism.data_axis_size,
+            )
+            return state, metrics
+
+        return shard_map(
+            train_step,
+            mesh=self.mesh,
+            in_specs=(self.train_state_axes, self.P_data_model, self.P_data_model),
+            out_spec=(self.train_state_axes, self.P_data_model),
+        )
+
+    def create_evaluation_function(
+        self,
+    ) -> Callable[[TrainState, Batch, ImmutableMetrics | None], ImmutableMetrics]:
+        """Creates and returns a function for the evaluation step.
+
+        The function takes as input the training state and a batch from the val/test loader. The
+        function is expected to return a dictionary of logging metrics, and a new train state.
+        """
+
+        def eval_step(
+            state: TrainState, batch: Batch, metrics: ImmutableMetrics | None
+        ) -> ImmutableMetrics:
+            batch = gather_batch(batch, axis_name=self.parallelism.model_axis_name)
+            loss, (_, step_metrics) = self.trainer.loss_function(
+                state.params,
+                state,
+                batch,
+                random.PRNGKey(self.trainer.trainer_config.get("seed_eval", 0)),
+                train=False,
+            )
+            step_metrics["loss"] = loss
+            step_metrics = sync_step_metrics(
+                step_metrics, axis_name=self.parallelism.data_axis_name
+            )
+            metrics = update_metrics(
+                metrics,
+                step_metrics,
+                train=False,
+                batch_size=batch.size * self.parallelism.data_axis_size,
+            )
+            return metrics
+
+        return shard_map(
+            eval_step,
+            mesh=self.mesh,
+            in_specs=(self.train_state_axes, self.P_data_model, self.P_data_model),
+            out_spec=self.P_data_model,
+        )
+
+    def run_model_init(self, exmp_input: Batch, init_rng: random.KeyArray) -> FrozenDict:
+        """The model initialization call.
+
+        Args:
+            exmp_input: An input to the model with which the shapes are inferred.
+            init_rng: A jax.random.PRNGKey.
+
+        Returns:
+            The initialized variable dictionary.
+        """
+
+        def init_variables(rng: random.KeyArray, exmp_input: Batch) -> Tuple[Any, jax.Array]:
+            init_rng = self.trainer.get_model_rng(rng)
+            init_rng["params"] = fold_rng_over_axis(
+                init_rng["params"], self.parallelism.model_axis_name
+            )
+            exmp_input = self.trainer.batch_to_input(exmp_input)
+            variables = self.trainer.model.init(init_rng, exmp_input, train=False)
+            if not isinstance(variables, FrozenDict):
+                variables = freeze(variables)
+            return variables
+
+        return shard_map(
+            init_variables,
+            mesh=self.mesh,
+            in_specs=(P(), self.P_data_model),
+            out_spec=self.P_data_model,
+        )(init_rng)
+
+    def tabulate(self, exmp_input: Batch) -> str:
+        return "Not supported yet."
+
+    def tabulate_params(self) -> str:
+        return "Not supported yet."
+
+    def init_state_with_optimizer(self, optimizer: Any) -> TrainState:
+        """Initializes the train state with an optimizer.
+
+        Args:
+            optimizer: An optimizer.
+
+        Returns:
+            The initialized train state.
+        """
+
+        def init_train_state(state: TrainState) -> TrainState:
+            return TrainState.create(
+                apply_fn=state.apply_fn,
+                params=state.params,
+                mutable_variables=state.mutable_variables,
+                tx=optimizer,
+                rng=state.rng,
+            )
+
+        return shard_map(
+            init_train_state,
+            mesh=self.mesh,
+            in_specs=TrainState(
+                global_step=P(),
+                opt_state=None,
+                tx=None,
+                params=self.P_data_model,
+                mutable_variables=self.P_data_model,
+                rng=P(),
+            ),
+            out_spec=self.train_state_axes,
+        )(self.trainer.train_state)
