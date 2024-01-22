@@ -1,0 +1,62 @@
+seed: 42
+num_gpus: 1
+trainer:
+  name: ImgClassifierTrainer
+  train_epochs: 5
+  check_val_every_n_epoch: 1
+  debug: False
+  enable_progress_bar: True
+  tabulate_model: True
+  seed: 42
+  seed_eval: 0
+  log_grad_norm: True
+  detect_nans: True
+  logger:
+    log_dir: tests/checkpoints/BuildParallelTrainerTestDP/
+    tool: TensorBoard
+    project_name: default
+    log_file_verbosity: warning
+  callbacks:
+    ModelCheckpoint:
+      monitor: val/acc
+      mode: max
+      save_top_k: 1
+      save_optimizer_state: False
+    ConfusionMatrixCallback:
+      normalize: True
+      cmap: Blues
+      every_n_epochs: 2
+    LearningRateMonitor:
+      every_n_epochs: 1
+    JAXProfiler:
+      every_n_minutes: 60
+      first_step: 10
+      profile_n_steps: 20
+  parallelism:
+    data_axis_name: data
+    model_axis_name: model
+    model_axis_size: 1
+model:
+  name: tests.models.SimpleClassifier
+  hparams:
+    c_hid: 32
+    num_classes: 10
+    act_fn: gelu
+    batch_norm: True
+optimizer:
+  name: adam
+  lr: 1e-3
+  params:
+    beta1: 0.9
+    beta2: 0.999
+  transforms:
+    weight_decay: 0
+    gradient_clip_norm: 10.0
+  scheduler:
+    name: warmup_cosine_decay
+    warmup_steps: 100
+dataset:
+  constructor: jax_trainer.datasets.build_cifar10_datasets
+  data_dir: data/
+  batch_size: 128
+  num_workers: 0

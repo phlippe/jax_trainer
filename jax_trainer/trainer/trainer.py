@@ -59,12 +59,13 @@ from jax_trainer.logger import (
 )
 from jax_trainer.optimizer import OptimizerBuilder
 from jax_trainer.sharding import (
+    create_sharded_array,
+    create_sharded_batch,
     fold_rng_over_axis,
     gather_batch,
     sync_gradients,
     sync_step_metrics,
 )
-from jax_trainer.trainer import model_handler
 from jax_trainer.utils import class_to_name, flatten_dict, resolve_import
 
 
@@ -256,6 +257,7 @@ class TrainerModule:
         for callback in self.callbacks:
             callback.set_dataset(dataset)
         self.dataset = dataset
+        self.model_handler.dataset_set()
 
     def get_model_rng(self, rng: random.PRNGKey) -> Dict[str, random.PRNGKey]:
         """Returns a dictionary of PRNGKey for init and tabulate.
@@ -787,6 +789,9 @@ class ModelHandler:
     def post_build_model(self):
         pass
 
+    def dataset_set(self):
+        pass
+
     def create_training_function(
         self,
     ) -> Callable[
@@ -972,8 +977,8 @@ class MeshModelHandler(ModelHandler):
 
     def create_mesh(self):
         """Mesh creation."""
-        assert hasattr(
-            "parallelism", self.trainer.trainer_config
+        assert (
+            self.trainer.trainer_config.get("parallelism", None) is not None
         ), "ParallelTrainerModule requires a parallelism configuration. Please specify it in the trainer config."
         self.parallelism = self.trainer.trainer_config.parallelism
         # Create mesh of devices using model and data parallelism.
@@ -983,7 +988,7 @@ class MeshModelHandler(ModelHandler):
                 f"Device count ({jax.device_count()}) is not divisible by model size ({model_axis_size})."
             )
         data_axis_size = jax.device_count() // model_axis_size
-        if hasattr(self.parallelism, "data_axis_size"):
+        if self.parallelism.get("data_axis_size", None) is not None:
             if self.parallelism.data_axis_size != data_axis_size:
                 raise ValueError(
                     f"Specified a data size of {self.parallelism.data_axis_size} but the device count ({jax.device_count()}) with model size ({model_axis_size}) results in an axis size of {data_axis_size}."
@@ -997,7 +1002,8 @@ class MeshModelHandler(ModelHandler):
         )
         self.P_data_model = P(self.parallelism.data_axis_name, self.parallelism.model_axis_name)
         self.train_state_axes = TrainState(
-            global_step=P(),
+            step=P(),
+            apply_fn=None,
             opt_state=self.P_data_model,
             tx=None,
             params=self.P_data_model,
@@ -1056,7 +1062,7 @@ class MeshModelHandler(ModelHandler):
             train_step,
             mesh=self.mesh,
             in_specs=(self.train_state_axes, self.P_data_model, self.P_data_model),
-            out_spec=(self.train_state_axes, self.P_data_model),
+            out_specs=(self.train_state_axes, self.P_data_model),
         )
 
     def create_evaluation_function(
@@ -1095,8 +1101,15 @@ class MeshModelHandler(ModelHandler):
             eval_step,
             mesh=self.mesh,
             in_specs=(self.train_state_axes, self.P_data_model, self.P_data_model),
-            out_spec=self.P_data_model,
+            out_specs=self.P_data_model,
         )
+
+    def dataset_set(self):
+        shard_fn = lambda x: create_sharded_batch(x, mesh=self.mesh)
+        self.trainer.dataset.train_loader = map(shard_fn, self.trainer.dataset.train_loader)
+        self.trainer.dataset.val_loader = map(shard_fn, self.trainer.dataset.val_loader)
+        if self.trainer.dataset.test_loader is not None:
+            self.trainer.dataset.test_loader = map(shard_fn, self.trainer.dataset.test_loader)
 
     def run_model_init(self, exmp_input: Batch, init_rng: random.KeyArray) -> FrozenDict:
         """The model initialization call.
@@ -1110,6 +1123,7 @@ class MeshModelHandler(ModelHandler):
         """
 
         def init_variables(rng: random.KeyArray, exmp_input: Batch) -> Tuple[Any, jax.Array]:
+            print("rng in shard map", rng.shape)
             init_rng = self.trainer.get_model_rng(rng)
             init_rng["params"] = fold_rng_over_axis(
                 init_rng["params"], self.parallelism.model_axis_name
@@ -1120,12 +1134,20 @@ class MeshModelHandler(ModelHandler):
                 variables = freeze(variables)
             return variables
 
-        return shard_map(
-            init_variables,
-            mesh=self.mesh,
-            in_specs=(P(), self.P_data_model),
-            out_spec=self.P_data_model,
-        )(init_rng)
+        exmp_input = create_sharded_batch(exmp_input, mesh=self.mesh)
+        init_rng = create_sharded_array(
+            jnp.stack([init_rng] * jax.local_device_count(), axis=0), mesh=self.mesh
+        )
+        print("init rng", init_rng.shape)
+        return jax.jit(
+            shard_map(
+                init_variables,
+                mesh=self.mesh,
+                in_specs=(self.P_data_model, self.P_data_model),
+                out_specs=self.P_data_model,
+                check_rep=False,
+            )
+        )(init_rng, exmp_input)
 
     def tabulate(self, exmp_input: Batch) -> str:
         return "Not supported yet."
@@ -1152,16 +1174,19 @@ class MeshModelHandler(ModelHandler):
                 rng=state.rng,
             )
 
-        return shard_map(
-            init_train_state,
-            mesh=self.mesh,
-            in_specs=TrainState(
-                global_step=P(),
-                opt_state=None,
-                tx=None,
-                params=self.P_data_model,
-                mutable_variables=self.P_data_model,
-                rng=P(),
-            ),
-            out_spec=self.train_state_axes,
+        return jax.jit(
+            shard_map(
+                init_train_state,
+                mesh=self.mesh,
+                in_specs=TrainState(
+                    step=P(),
+                    opt_state=None,
+                    tx=None,
+                    params=self.P_data_model,
+                    mutable_variables=self.P_data_model,
+                    rng=P(),
+                ),
+                out_specs=self.train_state_axes,
+                check_rep=False,
+            )
         )(self.trainer.train_state)
