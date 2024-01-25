@@ -6,6 +6,7 @@ from typing import Any, Tuple
 import jax
 import jax.numpy as jnp
 import numpy as np
+from absl import logging
 
 
 @dataclass
@@ -43,7 +44,11 @@ def spec_to_array(spec: ArraySpec) -> jnp.ndarray:
                 device_id = int(device_id)
             else:
                 backend_name, device_id = device, 0
-            device = jax.devices(backend_name)[device_id]
+            try:
+                device = jax.devices(backend_name)[device_id]
+            except Exception as e:
+                logging.warning(f"Backend {backend_name} not found, using CPU instead.")
+                device = jax.devices("cpu")[0]
         array = jax.device_put(x=array, device=device)
         return array
 
