@@ -21,6 +21,7 @@ from typing import (
 )
 
 import flax
+import flax.linen as nn
 
 # JAX/Flax libraries
 import jax
@@ -111,7 +112,6 @@ class TrainerModule:
         # Create empty model. Note: no parameters yet
         self.build_model(model_config)
         # Init trainer parts
-        self.create_jitted_functions()
         self.init_model(exmp_input)
         self.init_logger(self.trainer_config.get("logger", ConfigDict()))
         self.init_callbacks()
@@ -440,6 +440,7 @@ class TrainerModule:
         """
         # Create optimizer and the scheduler for the given number of epochs
         self.init_optimizer(num_epochs, len(train_loader))
+        self.create_jitted_functions()
         self.global_step = 0
         # Prepare training loop
         self.on_training_start()
@@ -992,25 +993,20 @@ class DataParallelModelHandler(ModelHandler):
         devices = np.asarray(jax.devices())
         self.parallelism.data_axis_name = self.parallelism.get("data_axis_name", "data")
         self.mesh = Mesh(devices, [self.parallelism.data_axis_name])
-        self.shard_parameters = self.parallelism.get("shard_parameters", False)
-        if self.shard_parameters:
-            self.params_partition = P(self.parallelism.data_axis_name)
-        else:
-            self.params_partition = P()
-        self.train_state_axes = TrainState(
-            step=P(),
-            apply_fn=None,
-            opt_state=self.params_partition,
-            tx=None,
-            params=self.params_partition,
-            mutable_variables=P(),
-            rng=P(),
+
+    def get_batch_partition(self, batch: Batch) -> Batch:
+        """Identifies the partition of the batch."""
+        return jax.tree_map(
+            lambda x: P(
+                self.parallelism.data_axis_name,
+            )
+            if isinstance(x, jax.Array) and x.ndim > 0 and x.shape[0] == batch.size
+            else P(),
+            batch,
         )
 
     def post_build_model(self):
-        if self.shard_parameters:
-            # TODO: Support sharding full model weights. Distinguish to layer-wise sharding.
-            pass
+        pass
 
     def create_training_function(
         self,
@@ -1039,7 +1035,7 @@ class DataParallelModelHandler(ModelHandler):
             step_metrics = sync_step_metrics(
                 step_metrics, axis_name=self.parallelism.data_axis_name
             )
-            grads = sync_gradients(grads, axis_name=self.parallelism.data_axis_name)
+            grads = sync_gradients(grads, axis_names=(self.parallelism.data_axis_name,))
             # Update state.
             state = state.apply_gradients(
                 grads=grads, mutable_variables=mutable_vars, rng=next_rng
@@ -1054,11 +1050,13 @@ class DataParallelModelHandler(ModelHandler):
             )
             return state, metrics
 
+        train_state_axes = nn.get_partition_spec(self.trainer.state)
+        batch_axis = self.get_batch_partition(self.trainer.exmp_input)
         return shard_map(
             train_step,
             mesh=self.mesh,
-            in_specs=(self.train_state_axes, P(self.parallelism.data_axis_name), P()),
-            out_specs=(self.train_state_axes, P()),
+            in_specs=(train_state_axes, batch_axis, P()),
+            out_specs=(train_state_axes, P()),
         )
 
     def create_evaluation_function(
@@ -1073,7 +1071,6 @@ class DataParallelModelHandler(ModelHandler):
         def eval_step(
             state: TrainState, batch: Batch, metrics: ImmutableMetrics | None
         ) -> ImmutableMetrics:
-            batch = gather_batch(batch, axis_name=self.parallelism.model_axis_name)
             loss, (_, step_metrics) = self.trainer.loss_function(
                 state.params,
                 state,
@@ -1093,20 +1090,17 @@ class DataParallelModelHandler(ModelHandler):
             )
             return metrics
 
+        train_state_axes = nn.get_partition_spec(self.trainer.state)
+        batch_axis = self.get_batch_partition(self.trainer.exmp_input)
         return shard_map(
             eval_step,
             mesh=self.mesh,
-            in_specs=(self.train_state_axes, P()),
+            in_specs=(train_state_axes, batch_axis, P()),
             out_specs=P(),
         )
 
     def dataset_set(self):
         pass
-        # shard_fn = lambda x: create_sharded_batch(x, mesh=self.mesh)
-        # self.trainer.dataset.train_loader = map(shard_fn, self.trainer.dataset.train_loader)
-        # self.trainer.dataset.val_loader = map(shard_fn, self.trainer.dataset.val_loader)
-        # if self.trainer.dataset.test_loader is not None:
-        #     self.trainer.dataset.test_loader = map(shard_fn, self.trainer.dataset.test_loader)
 
     def run_model_init(self, exmp_input: Batch, init_rng: random.KeyArray) -> FrozenDict:
         """The model initialization call.
@@ -1119,249 +1113,28 @@ class DataParallelModelHandler(ModelHandler):
             The initialized variable dictionary.
         """
 
-        def init_variables(rng: random.KeyArray, exmp_input: Batch) -> Tuple[Any, jax.Array]:
-            print("rng in shard map", rng.shape)
+        def init_fn(rng: random.KeyArray, batch: Batch) -> Any:
             init_rng = self.trainer.get_model_rng(rng)
-            init_rng["params"] = fold_rng_over_axis(
-                init_rng["params"], self.parallelism.model_axis_name
-            )
-            exmp_input = self.trainer.batch_to_input(exmp_input)
-            variables = self.trainer.model.init(init_rng, exmp_input, train=False)
+            batch = self.trainer.batch_to_input(batch)
+            variables = self.trainer.model.init(init_rng, batch, train=False)
             if not isinstance(variables, FrozenDict):
                 variables = freeze(variables)
             return variables
 
-        print("init rng", init_rng.shape)
-        return jax.jit(
-            shard_map(
-                init_variables,
-                mesh=self.mesh,
-                in_specs=(P(), P(self.parallelism.data_axis_name)),
-                out_specs=self.params_partition,
-            )
-        )(init_rng, exmp_input)
-
-    def tabulate(self, exmp_input: Batch) -> str:
-        return "Not supported yet."
-
-    def tabulate_params(self) -> str:
-        return "Not supported yet."
-
-    def init_state_with_optimizer(self, optimizer: Any) -> TrainState:
-        """Initializes the train state with an optimizer.
-
-        Args:
-            optimizer: An optimizer.
-
-        Returns:
-            The initialized train state.
-        """
-
-        def init_train_state(state: TrainState) -> TrainState:
-            return TrainState.create(
-                apply_fn=state.apply_fn,
-                params=state.params,
-                mutable_variables=state.mutable_variables,
-                tx=optimizer,
-                rng=state.rng,
-            )
-
-        return jax.jit(
-            shard_map(
-                init_train_state,
-                mesh=self.mesh,
-                in_specs=TrainState(
-                    step=P(),
-                    opt_state=None,
-                    tx=None,
-                    params=self.params_partition,
-                    mutable_variables=P(),
-                    rng=P(),
-                ),
-                out_specs=self.train_state_axes,
-                check_rep=False,
-            )
-        )(self.trainer.train_state)
-
-
-class MeshModelHandler(ModelHandler):
-    def __init__(self, trainer: TrainerModule):
-        super().__init__(trainer)
-        self.create_mesh()
-
-    def create_mesh(self):
-        """Mesh creation."""
-        assert (
-            self.trainer.trainer_config.get("parallelism", None) is not None
-        ), "ParallelTrainerModule requires a parallelism configuration. Please specify it in the trainer config."
-        self.parallelism = self.trainer.trainer_config.parallelism
-        # Create mesh of devices using model and data parallelism.
-        model_axis_size = self.parallelism.model_axis_size
-        if jax.device_count() % model_axis_size != 0:
-            raise ValueError(
-                f"Device count ({jax.device_count()}) is not divisible by model size ({model_axis_size})."
-            )
-        data_axis_size = jax.device_count() // model_axis_size
-        if self.parallelism.get("data_axis_size", None) is not None:
-            if self.parallelism.data_axis_size != data_axis_size:
-                raise ValueError(
-                    f"Specified a data size of {self.parallelism.data_axis_size} but the device count ({jax.device_count()}) with model size ({model_axis_size}) results in an axis size of {data_axis_size}."
+        def get_init_fn(out_specs: Any) -> Callable[[Any, random.KeyArray], Any]:
+            return jax.jit(
+                shard_map(
+                    init_fn,
+                    mesh=self.mesh,
+                    in_specs=(P(), self.get_batch_partition(exmp_input)),
+                    out_specs=out_specs,
+                    check_rep=False,
                 )
-        self.parallelism.data_axis_size = data_axis_size
-        devices = np.asarray(jax.devices()).reshape((data_axis_size, model_axis_size))
-        self.parallelism.model_axis_name = self.parallelism.get("model_axis_name", "model")
-        self.parallelism.data_axis_name = self.parallelism.get("data_axis_name", "data")
-        self.mesh = Mesh(
-            devices, [self.parallelism.data_axis_name, self.parallelism.model_axis_name]
-        )
-        self.P_data_model = P(self.parallelism.data_axis_name, self.parallelism.model_axis_name)
-        self.train_state_axes = TrainState(
-            step=P(),
-            apply_fn=None,
-            opt_state=self.P_data_model,
-            tx=None,
-            params=self.P_data_model,
-            mutable_variables=self.P_data_model,
-            rng=self.P_data_model,
-        )
-
-    def post_build_model(self):
-        # TODO: Support sharding full model weights.
-        pass
-
-    def create_training_function(
-        self,
-    ) -> Callable[
-        [TrainState, Batch, ImmutableMetrics | None], Tuple[TrainState, ImmutableMetrics]
-    ]:
-        """Creates and returns a function for the training step.
-
-        The function takes as input the training state and a batch from the train loader. The
-        function is expected to return a dictionary of logging metrics, and a new train state.
-        """
-
-        def train_step(
-            state: TrainState, batch: Batch, metrics: ImmutableMetrics | None
-        ) -> Tuple[TrainState, ImmutableMetrics]:
-            batch = gather_batch(batch, axis_name=self.parallelism.model_axis_name)
-            next_rng, step_rng = random.split(state.rng)
-            loss_fn = lambda params: self.trainer.loss_function(
-                params, state, batch, step_rng, train=True
             )
-            ret, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
-            loss, mutable_vars, step_metrics = ret[0], *ret[1]
-            if mutable_vars is not None:
-                mutable_vars = freeze(mutable_vars)  # Ensure that mutable_vars is a frozen dict.
-            step_metrics["loss"] = loss
-            # Sync grads and metrics across all devices.
-            step_metrics = sync_step_metrics(
-                step_metrics, axis_name=self.parallelism.data_axis_name
-            )
-            grads = sync_gradients(grads, axis_name=self.parallelism.data_axis_name)
-            # Update state.
-            state = state.apply_gradients(
-                grads=grads, mutable_variables=mutable_vars, rng=next_rng
-            )
-            if self.trainer.trainer_config.get("log_grad_norm", False):
-                step_metrics = add_grad_norm_metrics(step_metrics, grads, state.params)
-            metrics = update_metrics(
-                metrics,
-                step_metrics,
-                train=True,
-                batch_size=batch.size * self.parallelism.data_axis_size,
-            )
-            return state, metrics
 
-        return shard_map(
-            train_step,
-            mesh=self.mesh,
-            in_specs=(self.train_state_axes, self.P_data_model, self.P_data_model),
-            out_specs=(self.train_state_axes, self.P_data_model),
-        )
-
-    def create_evaluation_function(
-        self,
-    ) -> Callable[[TrainState, Batch, ImmutableMetrics | None], ImmutableMetrics]:
-        """Creates and returns a function for the evaluation step.
-
-        The function takes as input the training state and a batch from the val/test loader. The
-        function is expected to return a dictionary of logging metrics, and a new train state.
-        """
-
-        def eval_step(
-            state: TrainState, batch: Batch, metrics: ImmutableMetrics | None
-        ) -> ImmutableMetrics:
-            batch = gather_batch(batch, axis_name=self.parallelism.model_axis_name)
-            loss, (_, step_metrics) = self.trainer.loss_function(
-                state.params,
-                state,
-                batch,
-                random.PRNGKey(self.trainer.trainer_config.get("seed_eval", 0)),
-                train=False,
-            )
-            step_metrics["loss"] = loss
-            step_metrics = sync_step_metrics(
-                step_metrics, axis_name=self.parallelism.data_axis_name
-            )
-            metrics = update_metrics(
-                metrics,
-                step_metrics,
-                train=False,
-                batch_size=batch.size * self.parallelism.data_axis_size,
-            )
-            return metrics
-
-        return shard_map(
-            eval_step,
-            mesh=self.mesh,
-            in_specs=(self.train_state_axes, self.P_data_model, self.P_data_model),
-            out_specs=self.P_data_model,
-        )
-
-    def dataset_set(self):
-        shard_fn = lambda x: create_sharded_batch(x, mesh=self.mesh)
-        self.trainer.dataset.train_loader = map(shard_fn, self.trainer.dataset.train_loader)
-        self.trainer.dataset.val_loader = map(shard_fn, self.trainer.dataset.val_loader)
-        if self.trainer.dataset.test_loader is not None:
-            self.trainer.dataset.test_loader = map(shard_fn, self.trainer.dataset.test_loader)
-
-    def run_model_init(self, exmp_input: Batch, init_rng: random.KeyArray) -> FrozenDict:
-        """The model initialization call.
-
-        Args:
-            exmp_input: An input to the model with which the shapes are inferred.
-            init_rng: A jax.random.PRNGKey.
-
-        Returns:
-            The initialized variable dictionary.
-        """
-
-        def init_variables(rng: random.KeyArray, exmp_input: Batch) -> Tuple[Any, jax.Array]:
-            print("rng in shard map", rng.shape)
-            init_rng = self.trainer.get_model_rng(rng)
-            init_rng["params"] = fold_rng_over_axis(
-                init_rng["params"], self.parallelism.model_axis_name
-            )
-            exmp_input = self.trainer.batch_to_input(exmp_input)
-            variables = self.trainer.model.init(init_rng, exmp_input, train=False)
-            if not isinstance(variables, FrozenDict):
-                variables = freeze(variables)
-            return variables
-
-        exmp_input = create_sharded_batch(exmp_input, mesh=self.mesh)
-        init_rng = create_sharded_array(
-            jnp.stack([init_rng] * jax.local_device_count(), axis=0), mesh=self.mesh
-        )
-        print("init rng", init_rng.shape)
-        return jax.jit(
-            shard_map(
-                init_variables,
-                mesh=self.mesh,
-                in_specs=(self.P_data_model, self.P_data_model),
-                out_specs=self.P_data_model,
-                check_rep=False,
-            )
-        )(init_rng, exmp_input)
+        variable_shapes = jax.eval_shape(get_init_fn(P()), init_rng, exmp_input)
+        variable_specs = nn.get_partition_spec(variable_shapes)
+        return get_init_fn(variable_specs)(init_rng, exmp_input)
 
     def tabulate(self, exmp_input: Batch) -> str:
         return "Not supported yet."
@@ -1388,19 +1161,17 @@ class MeshModelHandler(ModelHandler):
                 rng=state.rng,
             )
 
-        return jax.jit(
-            shard_map(
-                init_train_state,
-                mesh=self.mesh,
-                in_specs=TrainState(
-                    step=P(),
-                    opt_state=None,
-                    tx=None,
-                    params=self.P_data_model,
-                    mutable_variables=self.P_data_model,
-                    rng=P(),
-                ),
-                out_specs=self.train_state_axes,
-                check_rep=False,
+        def get_init_fn(out_specs: Any) -> Callable[[TrainState], TrainState]:
+            return jax.jit(
+                shard_map(
+                    init_train_state,
+                    mesh=self.mesh,
+                    in_specs=nn.get_partition_spec(self.trainer.state),
+                    out_specs=out_specs,
+                    check_rep=False,
+                )
             )
-        )(self.trainer.train_state)
+
+        state_shapes = jax.eval_shape(get_init_fn(P()), self.trainer.state)
+        state_specs = nn.get_partition_spec(state_shapes)
+        return get_init_fn(state_specs)(self.trainer.state)

@@ -6,8 +6,8 @@ import jax
 import jax.numpy as jnp
 from flax.core.frozen_dict import FrozenDict
 
-from jax_trainer.parallelism import fold_rng_over_axis
 from jax_trainer.parallelism.parameters import stack_params, unstack_params
+from jax_trainer.parallelism.random import fold_rng_over_axis
 
 PyTree = Any
 Parameter = jax.Array | nn.Partitioned

@@ -1,10 +1,12 @@
+from typing import Sequence
+
 import jax
 from flax.core import FrozenDict, unfreeze
 
 from jax_trainer.logger import StepMetrics
 
 
-def sync_step_metrics(metrics: StepMetrics, axis_name: str) -> StepMetrics:
+def sync_step_metrics(metrics: StepMetrics, axis_name: str | Sequence[str]) -> StepMetrics:
     """Sync metrics across devices.
 
     Args:
