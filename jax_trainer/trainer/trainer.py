@@ -58,7 +58,7 @@ from jax_trainer.logger import (
     update_metrics,
 )
 from jax_trainer.optimizer import OptimizerBuilder
-from jax_trainer.sharding import (
+from jax_trainer.parallelism import (
     create_sharded_array,
     create_sharded_batch,
     fold_rng_over_axis,
