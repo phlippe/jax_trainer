@@ -243,7 +243,7 @@ class TrainerModule:
         """
         return {"params": rng}
 
-    def run_model_init(self, exmp_input: Batch, init_rng: random.KeyArray) -> Dict:
+    def run_model_init(self, exmp_input: Batch, init_rng: jax.Array) -> Dict:
         """The model initialization call.
 
         Args:

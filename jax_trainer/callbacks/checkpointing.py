@@ -26,23 +26,24 @@ class ModelCheckpoint(Callback):
             cleanup_tmp_directories=True,
             create=True,
         )
-        checkpointers = {
-            "params": ocp.PyTreeCheckpointer(),
-            "metadata": ocp.Checkpointer(ocp.JsonCheckpointHandler()),
-        }
-        if self.trainer.state.mutable_variables is not None:
-            checkpointers["mutable_variables"] = ocp.PyTreeCheckpointer()
-        if self.config.get("save_optimizer_state", False):
-            checkpointers["optimizer"] = ocp.PyTreeCheckpointer()
         self.metadata = {
             "trainer": self.trainer.trainer_config.to_dict(),
             "model": self.trainer.model_config.to_dict(),
             "optimizer": self.trainer.optimizer_config.to_dict(),
         }
         self.metadata = jax.tree_map(class_to_name, self.metadata)
+        item_handlers = {
+            "params": ocp.StandardCheckpointHandler(),
+            "metadata": ocp.JsonCheckpointHandler(),
+        }
+        if self.trainer.state.mutable_variables is not None:
+            item_handlers["mutable_variables"] = ocp.StandardCheckpointHandler()
+        if self.config.get("save_optimizer_state", False):
+            item_handlers["optimizer"] = ocp.StandardCheckpointHandler()
         self.manager = ocp.CheckpointManager(
             directory=os.path.abspath(os.path.join(self.log_dir, "checkpoints/")),
-            checkpointers=checkpointers,
+            item_names=tuple(item_handlers.keys()),
+            item_handlers=item_handlers,
             options=options,
         )
 
@@ -60,17 +61,23 @@ class ModelCheckpoint(Callback):
         assert (
             self.config.monitor in eval_metrics
         ), f"Metric to monitor \"{self.config.monitor}\" not found in eval metrics. Instead has keys: {', '.join(list(eval_metrics.keys()))}"
-        save_items = {"params": self.trainer.state.params, "metadata": self.metadata}
+        save_items = {
+            "params": ocp.args.StandardSave(self.trainer.state.params),
+            "metadata": ocp.args.JsonSave(self.metadata),
+        }
         if self.trainer.state.mutable_variables is not None:
-            save_items["mutable_variables"] = self.trainer.state.mutable_variables
+            save_items["mutable_variables"] = ocp.args.StandardSave(
+                self.trainer.state.mutable_variables
+            )
         if self.config.get("save_optimizer_state", False):
-            save_items["optimizer"] = self.trainer.state.optimizer
+            save_items["optimizer"] = ocp.args.StandardSave(self.trainer.state.optimizer)
         eval_metrics = {
             k: eval_metrics[k]
             for k in eval_metrics
             if isinstance(eval_metrics[k], (int, float, str, bool))
         }
-        self.manager.save(epoch_idx, save_items, metrics=eval_metrics)
+        save_items = ocp.args.Composite(**save_items)
+        self.manager.save(epoch_idx, args=save_items, metrics=eval_metrics)
 
     def load_model(self, epoch_idx=-1):
         """Loads model parameters and variables from the logging directory.
@@ -85,8 +92,10 @@ class ModelCheckpoint(Callback):
         if epoch_idx == -1:
             epoch_idx = self.manager.best_step()
         state_dict = self.manager.restore(epoch_idx)
+        state_dict = {k: v for k, v in state_dict.items() if v is not None}
         return state_dict
 
     def finalize(self, status: Optional[str] = None):
         logging.info("Closing checkpoint manager")
+        self.manager.wait_until_finished()
         self.manager.close()
