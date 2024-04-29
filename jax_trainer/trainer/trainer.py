@@ -232,7 +232,7 @@ class TrainerModule:
             callback.set_dataset(dataset)
         self.dataset = dataset
 
-    def get_model_rng(self, rng: random.PRNGKey) -> Dict[str, random.PRNGKey]:
+    def get_model_rng(self, rng: jax.Array) -> Dict[str, random.PRNGKey]:
         """Returns a dictionary of PRNGKey for init and tabulate.
 
         Args:
@@ -349,7 +349,7 @@ class TrainerModule:
             )
 
     def loss_function(
-        self, params: Any, state: TrainState, batch: Batch, rng: random.PRNGKey, train: bool = True
+        self, params: Any, state: TrainState, batch: Batch, rng: jax.Array, train: bool = True
     ) -> Tuple[jnp.array, Tuple[Any, Dict]]:
         """The loss function that is used for training.
 
@@ -363,7 +363,7 @@ class TrainerModule:
         params: Any,
         state: TrainState,
         input: Any,
-        rng: random.PRNGKey,
+        rng: jax.Array,
         train: bool = True,
         mutable: Optional[Sequence[str]] = None,
         **kwargs,

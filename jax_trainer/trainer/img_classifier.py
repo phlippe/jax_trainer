@@ -19,7 +19,7 @@ class ImgClassifierTrainer(TrainerModule):
         params: Any,
         state: TrainState,
         batch: SupervisedBatch,
-        rng: random.PRNGKey,
+        rng: jax.Array,
         train: bool = True,
     ) -> Tuple[Any, Tuple[Any, Dict]]:
         """Loss function for image classification.
