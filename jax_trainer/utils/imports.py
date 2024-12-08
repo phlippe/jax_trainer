@@ -25,4 +25,4 @@ def resolve_import_from_string(import_string: str) -> Any:
 
 
 def class_to_name(x: Any) -> str | Any:
-    return (inspect.getmodule(x).__name__ + "." + x.__name__) if inspect.isclass(x) else x
+    return (inspect.getmodule(x).__name__ + "." + x.__name__) if inspect.isclass(x) or inspect.isfunction(x) else x

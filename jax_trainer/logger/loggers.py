@@ -83,7 +83,7 @@ class Logger:
                 save_key += f"_{log_postfix}"
             metrics_to_log[save_key] = metric_value
         if len(metrics_to_log) > 0:
-            self.logger.log_metrics(metrics_to_log, step)
+            self.logger.log_metrics(metrics_to_log, step=step)
 
     def log_scalar(
         self,
@@ -279,7 +279,7 @@ class Logger:
                 dataformats="HWC",
             )
         elif isinstance(self.logger, WandbLogger):
-            self.logger.log_image(key=f"{logging_mode}/{key}{log_postfix}", image=image, step=step)
+            self.logger.log_image(key=f"{logging_mode}/{key}{log_postfix}", images=[image], step=step)
         else:
             raise ValueError(f"Unknown logger {self.logger}.")
 
@@ -352,4 +352,7 @@ class Logger:
     @property
     def log_dir(self):
         """Returns the logging directory of the logger."""
-        return self.logger.log_dir
+        log_dir = self.logger.log_dir
+        if log_dir is None:
+            log_dir = os.path.join(self.logger.save_dir, self.logger.version)
+        return log_dir

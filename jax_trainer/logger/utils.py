@@ -95,11 +95,21 @@ def build_tool_logger(logger_config: ConfigDict, full_config: ConfigDict):
         hparams = jax.tree_map(class_to_name, hparams)
         logger.log_hyperparams(hparams)
     elif logger_type == "wandb":
+        if version is None:
+            version = time.strftime("%Y%m%d-%H%M%S")
+            # Add random string to make sure the version is unique
+            config_string = str(full_config.to_dict())
+            version += "-" + str(abs(hash(config_string)) % (10 ** 12))
+        dict_config = full_config.to_dict()
+        dict_config["checkpoint_log_dir"] = log_dir
+        dict_config["checkpoint_version"] = version
         logger = WandbLogger(
-            name=logger_config.get("project_name", None),
+            name=logger_config.get("wandb_name", None),
+            project=logger_config.get("project_name", None),
             save_dir=log_dir,
             version=version,
-            config=full_config,
+            config=dict_config,
+            log_model=False,
         )
     else:
         raise ValueError(f"Unknown logger type {logger_type}.")
